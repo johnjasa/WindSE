@@ -6,6 +6,8 @@ import glob
 
 from alm_class import UpdateActuatorLineForce
 from simpler_alm_class import SimplerUpdateActuatorLineForce
+import openmdao.api as om
+from full_alm_openmdao import FullALM
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
@@ -174,7 +176,7 @@ turb_i = 0
 mpi_u_fluid = 1
 
 # The number of timesteps to simulate
-tSteps = 10
+tSteps = 1
 
 # The timestep size
 dt = 0.1
@@ -203,12 +205,25 @@ for k in range(tSteps):
     tf = UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, mpi_u_fluid, dfd=None, verbose=False)
     full_tf = np.array(tf.vector()[:])
     
-    tf = SimplerUpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False)
+    tf = SimplerUpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None)
     simpler_tf = np.array(tf.vector()[:])
     
     print('norm:', np.linalg.norm(full_tf - simpler_tf))
     
-    exit()
+    
+    prob = om.Problem()
+    prob.model.add_subsystem('FullALM', FullALM(problem=problem,
+        simTime_id=simTime_id,
+        dt=dt,
+        turb_i=turb_i,
+        ), promotes=['*'])
+    prob.setup()
+    prob['u_local'] = [9., 0., 0.]
+    prob.run_model()
+    om_forces = prob['turbine_forces']
+    
+    print('om norm:', np.linalg.norm(full_tf - om_forces))
+    
     
     # Increment the total simTime
     simTime += dt
@@ -219,3 +234,4 @@ for k in range(tSteps):
 
     tf.rename('turbine_force', 'turbine_force')
     fp_tf << (tf, k)
+    print()

@@ -1,21 +1,11 @@
 from fenics import *
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.interpolate as interp
-import glob
 
 
-def SimplerUpdateActuatorLineForce(
-    problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False
-):
-
+def SimplerUpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None):
+    
     simTime = problem.simTime_list[simTime_id]
-
-    if verbose:
-        print(
-            "Current Optimization Time: " + repr(simTime) + ", Turbine #" + repr(turb_i)
-        )
-        sys.stdout.flush()
 
     def rot_x(theta):
         Rx = np.array(
@@ -27,17 +17,6 @@ def SimplerUpdateActuatorLineForce(
         )
 
         return Rx
-
-    def rot_y(theta):
-        Ry = np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta)],
-                [0, 1, 0],
-                [-np.sin(theta), 0, np.cos(theta)],
-            ]
-        )
-
-        return Ry
 
     def rot_z(theta):
         Rz = np.array(
@@ -154,18 +133,15 @@ def SimplerUpdateActuatorLineForce(
     # Note: this sets the gaussian width to roughly twice the minimum cell length scale
     eps = problem.gaussian_width
 
-    # initialize numpy torque
-    rotor_torque_numpy_temp = 0.0
-
     # Blade length (turbine radius)
-    L = problem.farm.radius[turb_i]
+    blade_length = problem.farm.radius[turb_i]
 
     # ================================================================
     # Set Derived Constants
     # ================================================================
 
     # Calculate the radial position of each actuator node
-    rdim = np.linspace(0.0, L, problem.num_blade_segments)
+    rdim = np.linspace(0.0, blade_length, problem.num_blade_segments)
 
     # Calculate width of an individual blade segment
     # width = rdim[1] - rdim[0]
@@ -185,7 +161,7 @@ def SimplerUpdateActuatorLineForce(
 
     # Calculate the blade velocity
     angular_velocity = 2.0 * np.pi * problem.rpm / 60.0
-    tip_speed = angular_velocity * L
+    tip_speed = angular_velocity * blade_length
 
     # Specify the velocity vector at each actuator node
     # Note: A blade with span oriented along the +y-axis moves in the +z direction
@@ -218,7 +194,7 @@ def SimplerUpdateActuatorLineForce(
     tip_loss = np.ones(problem.num_blade_segments)
 
     # Read the chord length from the values specified in the problem manager
-    # c = L/20.0
+    # c = blade_length/20.0
     c = np.array(problem.mchord[turb_i], dtype=float)
 
     # Initialze arrays depending on what this function will be returning
@@ -238,7 +214,7 @@ def SimplerUpdateActuatorLineForce(
     for blade_ct, theta_0 in enumerate(theta_vec):
         # If the minimum distance between this mesh and the turbine is >2*RD,
         # don't need to account for this turbine
-        if problem.min_dist[turb_i] > 2.0 * (2.0 * L):
+        if problem.min_dist[turb_i] > 2.0 * (2.0 * blade_length):
             break
 
         theta = theta_0 + theta_offset
@@ -250,10 +226,12 @@ def SimplerUpdateActuatorLineForce(
         # Rotate the blade velocity in the global x, y, z, coordinate system
         # Note: blade_vel_base is negative since we seek the velocity of the fluid relative to a stationary blade
         # and blade_vel_base is defined based on the movement of the blade
-        blade_vel = np.dot(Rz, np.dot(Rx, -blade_vel_base))
+        blade_vel_temp = np.dot(Rx, -blade_vel_base)
+        blade_vel = np.dot(Rz, blade_vel_temp)
 
         # Rotate the blade unit vectors to be pointing in the rotated positions
-        blade_unit_vec = np.dot(Rz, np.dot(Rx, blade_unit_vec_base))
+        blade_unit_vec_temp = np.dot(Rx, blade_unit_vec_base)
+        blade_unit_vec = np.dot(Rz, blade_unit_vec_temp)
 
         # Rotate the entire [x; y; z] matrix using this matrix, then shift to the hub location
         blade_pos = np.dot(Rz, np.dot(Rx, blade_pos_base))
@@ -280,11 +258,10 @@ def SimplerUpdateActuatorLineForce(
                 * 2.0
                 * np.pi
             )
-            # if blade_ct == 0:
-            #     print('SimTime = %f, using %f' % (simTime, problem.simTime_list[-time_offset]))
 
         Rx_alt = rot_x(theta_behind)
-        blade_pos_alt = np.dot(Rz, np.dot(Rx_alt, blade_pos_base))
+        temp = np.dot(Rx_alt, blade_pos_base)
+        blade_pos_alt = np.dot(Rz, temp)
         blade_pos_alt[0, :] += problem.farm.x[turb_i]
         blade_pos_alt[1, :] += problem.farm.y[turb_i]
         blade_pos_alt[2, :] += problem.farm.z[turb_i]
@@ -298,7 +275,7 @@ def SimplerUpdateActuatorLineForce(
             u_fluid[:, k] = u_local(
                 blade_pos_alt[0, k], blade_pos_alt[1, k], blade_pos_alt[2, k]
             )
-
+            
             u_fluid[:, k] -= (
                 np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
             )
@@ -339,7 +316,7 @@ def SimplerUpdateActuatorLineForce(
 
         for k in range(problem.num_blade_segments):
             # The drag unit simply points opposite the relative velocity unit vector
-            drag_unit_vec = -np.copy(u_unit_vec[:, k]) 
+            drag_unit_vec = -np.copy(u_unit_vec[:, k])
 
             # The lift is normal to the plane generated by the blade and relative velocity
             lift_unit_vec = np.cross(drag_unit_vec, blade_unit_vec[:, 1])
