@@ -202,13 +202,11 @@ for k in range(tSteps):
     
     tf = UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, mpi_u_fluid, dfd=None, verbose=False)
     full_tf = np.array(tf.vector()[:])
-    print(full_tf.shape)    
     
-    tf = SimplerUpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, mpi_u_fluid, dfd=None, verbose=False)
+    tf = SimplerUpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False)
     simpler_tf = np.array(tf.vector()[:])
-    print(simpler_tf.shape)
     
-    print(np.linalg.norm(full_tf - simpler_tf))
+    print('norm:', np.linalg.norm(full_tf - simpler_tf))
     
     exit()
     
