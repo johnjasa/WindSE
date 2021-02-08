@@ -47,7 +47,8 @@ problem.farm = BlankObject()
 # radius, a list with num_turbs elements, radius[0] = blade radius of turbine 0
 problem.farm.radius = [65.0]
 # myaw, a list with num_turbs elements, myaw[0] = yaw angle of turbine 0
-problem.farm.myaw = [0]
+yaw = 0.
+problem.farm.myaw = [yaw]
 # mx, a list with num_turbs elements, mx[0] = x-position turbine 0
 problem.farm.mx = [0]
 problem.farm.x = [0]
@@ -219,6 +220,7 @@ for k in range(tSteps):
         ), promotes=['*'])
     prob.setup()
     prob['u_local'] = [9., 0., 0.]
+    prob['yaw'] = yaw
     prob.run_model()
     om_forces = prob['turbine_forces']
     

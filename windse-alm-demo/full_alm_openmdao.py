@@ -29,6 +29,7 @@ class FullALM(om.ExplicitComponent):
         dt = self.dt
         turb_i = self.turb_i
         u_local = inputs['u_local']
+        problem.farm.myaw[turb_i] = inputs['yaw']
             
         simTime = problem.simTime_list[simTime_id]
 
