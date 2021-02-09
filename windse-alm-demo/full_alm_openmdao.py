@@ -3,6 +3,105 @@ import numpy as np
 import scipy.interpolate as interp
 import openmdao.api as om
 
+def rot_x(theta):
+    Rx = np.array(
+        [
+            [1, 0, 0],
+            [0, np.cos(theta), -np.sin(theta)],
+            [0, np.sin(theta), np.cos(theta)],
+        ]
+    )
+
+    return Rx
+
+def rot_z(theta):
+    Rz = np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta), np.cos(theta), 0],
+            [0, 0, 1],
+        ]
+    )
+
+    return Rz
+
+def build_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
+    if not hasattr(problem, "interp_lift"):
+        # build the lift-drag table interpolators
+        rdim_all = np.linspace(0, rdim[-1], np.shape(problem.lift_table)[1])
+        problem.interp_lift = interp.RectBivariateSpline(
+            problem.interp_angles, rdim_all, problem.lift_table
+        )
+        problem.interp_drag = interp.RectBivariateSpline(
+            problem.interp_angles, rdim_all, problem.drag_table
+        )
+
+def call_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
+    def get_angle_between_vectors(a, b, n):
+        a_x_b = np.dot(np.cross(n, a), b)
+
+        norm_a = np.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+        norm_b = np.sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
+
+        c1 = a_x_b / (norm_a * norm_b)
+        c1 = np.clip(c1, -1.0, 1.0)
+        aoa_1 = np.arcsin(c1)
+
+        c2 = np.dot(a, b) / (norm_a * norm_b)
+        c2 = np.clip(c2, -1.0, 1.0)
+        aoa_2 = np.arccos(c2)
+
+        if aoa_2 > np.pi / 2.0:
+            if aoa_1 < 0:
+                aoa_1 = -np.pi - aoa_1
+            else:
+                aoa_1 = np.pi - aoa_1
+
+        aoa_1_deg = aoa_1 / np.pi * 180.0
+
+        return aoa_1
+
+    # Initialize the real cl and cd profiles
+    real_cl = np.zeros(problem.num_blade_segments)
+    real_cd = np.zeros(problem.num_blade_segments)
+
+    tip_loss = np.zeros(problem.num_blade_segments)
+
+    for k in range(problem.num_blade_segments):
+        # Get the relative wind velocity at this node
+        wind_vec = u_rel[:, k]
+
+        # Remove the component in the radial direction (along the blade span)
+        wind_vec -= np.dot(wind_vec, blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
+
+        # aoa = get_angle_between_vectors(arg1, arg2, arg3)
+        # arg1 = in-plane vector pointing opposite rotation (blade sweep direction)
+        # arg2 = relative wind vector at node k, including blade rotation effects (wind direction)
+        # arg3 = unit vector normal to plane of rotation, in this case, radially along span
+        aoa = get_angle_between_vectors(
+            -blade_unit_vec[:, 2], wind_vec, -blade_unit_vec[:, 1]
+        )
+
+        # Compute tip-loss factor
+        if rdim[k] < 1e-12:
+            tip_loss[k] = 1.0
+        else:
+            loss_exponent = (
+                3.0 / 2.0 * (rdim[-1] - rdim[k]) / (rdim[k] * np.sin(aoa))
+            )
+            acos_arg = np.exp(-loss_exponent)
+            acos_arg = np.clip(acos_arg, -1.0, 1.0)
+            tip_loss[k] = 2.0 / np.pi * np.arccos(acos_arg)
+
+        # Remove the portion of the angle due to twist
+        aoa -= twist[k]
+
+        # Store the cl and cd by interpolating this (aoa, span) pair from the tables
+        real_cl[k] = problem.interp_lift(aoa, rdim[k])
+        real_cd[k] = problem.interp_drag(aoa, rdim[k])
+
+    return real_cl, real_cd, tip_loss
+
 
 class FullALM(om.ExplicitComponent):
 
@@ -28,122 +127,14 @@ class FullALM(om.ExplicitComponent):
         simTime_id = self.simTime_id
         dt = self.dt
         turb_i = self.turb_i
-        u_local = inputs['u_local']
-        problem.farm.myaw[turb_i] = inputs['yaw']
             
         simTime = problem.simTime_list[simTime_id]
-
-        def rot_x(theta):
-            Rx = np.array(
-                [
-                    [1, 0, 0],
-                    [0, np.cos(theta), -np.sin(theta)],
-                    [0, np.sin(theta), np.cos(theta)],
-                ]
-            )
-
-            return Rx
-
-        def rot_z(theta):
-            Rz = np.array(
-                [
-                    [np.cos(theta), -np.sin(theta), 0],
-                    [np.sin(theta), np.cos(theta), 0],
-                    [0, 0, 1],
-                ]
-            )
-
-            return Rz
-
-        def build_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
-            if not hasattr(problem, "interp_lift"):
-                # build the lift-drag table interpolators
-                rdim_all = np.linspace(0, rdim[-1], np.shape(problem.lift_table)[1])
-                problem.interp_lift = interp.RectBivariateSpline(
-                    problem.interp_angles, rdim_all, problem.lift_table
-                )
-                problem.interp_drag = interp.RectBivariateSpline(
-                    problem.interp_angles, rdim_all, problem.drag_table
-                )
-
-        def call_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
-            def get_angle_between_vectors(a, b, n):
-                a_x_b = np.dot(np.cross(n, a), b)
-
-                norm_a = np.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
-                norm_b = np.sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
-
-                c1 = a_x_b / (norm_a * norm_b)
-                c1 = np.clip(c1, -1.0, 1.0)
-                aoa_1 = np.arcsin(c1)
-
-                c2 = np.dot(a, b) / (norm_a * norm_b)
-                c2 = np.clip(c2, -1.0, 1.0)
-                aoa_2 = np.arccos(c2)
-
-                if aoa_2 > np.pi / 2.0:
-                    if aoa_1 < 0:
-                        aoa_1 = -np.pi - aoa_1
-                    else:
-                        aoa_1 = np.pi - aoa_1
-
-                aoa_1_deg = aoa_1 / np.pi * 180.0
-
-                return aoa_1
-
-            # Initialize the real cl and cd profiles
-            real_cl = np.zeros(problem.num_blade_segments)
-            real_cd = np.zeros(problem.num_blade_segments)
-
-            tip_loss = np.zeros(problem.num_blade_segments)
-
-            for k in range(problem.num_blade_segments):
-                # Get the relative wind velocity at this node
-                wind_vec = u_rel[:, k]
-
-                # Remove the component in the radial direction (along the blade span)
-                wind_vec -= np.dot(wind_vec, blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
-
-                # aoa = get_angle_between_vectors(arg1, arg2, arg3)
-                # arg1 = in-plane vector pointing opposite rotation (blade sweep direction)
-                # arg2 = relative wind vector at node k, including blade rotation effects (wind direction)
-                # arg3 = unit vector normal to plane of rotation, in this case, radially along span
-                aoa = get_angle_between_vectors(
-                    -blade_unit_vec[:, 2], wind_vec, -blade_unit_vec[:, 1]
-                )
-
-                # Compute tip-loss factor
-                if rdim[k] < 1e-12:
-                    tip_loss[k] = 1.0
-                else:
-                    loss_exponent = (
-                        3.0 / 2.0 * (rdim[-1] - rdim[k]) / (rdim[k] * np.sin(aoa))
-                    )
-                    acos_arg = np.exp(-loss_exponent)
-                    acos_arg = np.clip(acos_arg, -1.0, 1.0)
-                    tip_loss[k] = 2.0 / np.pi * np.arccos(acos_arg)
-
-                # Remove the portion of the angle due to twist
-                aoa -= twist[k]
-
-                # Store the cl and cd by interpolating this (aoa, span) pair from the tables
-                real_cl[k] = problem.interp_lift(aoa, rdim[k])
-                real_cd[k] = problem.interp_drag(aoa, rdim[k])
-
-            return real_cl, real_cd, tip_loss
 
         # ================================================================
         # Get Mesh Properties
         # ================================================================
 
         ndim = problem.dom.dim
-
-        # Initialize a cumulative turbine force function (contains all turbines)
-        tf = Function(problem.fs.V)
-        tf.vector()[:] = 0.0
-
-        # Initialize a cylindrical field function
-        cyld = Function(problem.fs.V)
 
         # ================================================================
         # Set Turbine and Fluid Properties
@@ -174,7 +165,7 @@ class FullALM(om.ExplicitComponent):
         width = (rdim[1] - rdim[0]) * np.ones(problem.num_blade_segments)
         width[0] = width[0] / 2.0
         width[-1] = width[-1] / 2.0
-
+        
         # Calculate an array describing the x, y, z position of each actuator node
         # Note: The basic blade is oriented along the +y-axis
         blade_pos_base = np.vstack(
@@ -202,12 +193,6 @@ class FullALM(om.ExplicitComponent):
         # Set the spacing pf each blade
         theta_vec = np.linspace(0.0, 2.0 * np.pi, num_blades, endpoint=False)
 
-        # Create unit vectors aligned with blade geometry
-        # blade_unit_vec_base[:, 0] = points along rotor shaft
-        # blade_unit_vec_base[:, 1] = points along blade span axis
-        # blade_unit_vec_base[:, 2] = points tangential to blade span axis (generates a torque about rotor shaft)
-        blade_unit_vec_base = np.eye((3))
-
         # ================================================================
         # Begin Calculating Turbine Forces
         # ================================================================
@@ -220,23 +205,19 @@ class FullALM(om.ExplicitComponent):
         tip_loss = np.ones(problem.num_blade_segments)
 
         # Read the chord length from the values specified in the problem manager
-        # c = blade_length/20.0
         c = np.array(problem.mchord[turb_i], dtype=float)
 
         # Initialze arrays depending on what this function will be returning
         tf_vec = np.zeros(np.size(problem.coords))
-        tf_vec_for_power = np.zeros(np.size(problem.coords))
         lift_force = np.zeros((np.shape(problem.coords)[0], ndim))
         drag_force = np.zeros((np.shape(problem.coords)[0], ndim))
 
         # Calculate the blade position based on current simTime and turbine RPM
         period = 60.0 / problem.rpm
-        # theta_offset = simTime/period*2.0*np.pi
         theta_offset = (simTime + 0.5 * dt) / period * 2.0 * np.pi
-        # theta_offset = 0.0
 
         # Treat each blade separately
-        for blade_ct, theta_0 in enumerate(theta_vec):
+        for theta_0 in theta_vec:
             # If the minimum distance between this mesh and the turbine is >2*RD,
             # don't need to account for this turbine
             if problem.min_dist[turb_i] > 2.0 * (2.0 * blade_length):
@@ -246,51 +227,24 @@ class FullALM(om.ExplicitComponent):
 
             # Generate a rotation matrix for this turbine blade
             Rx = rot_x(theta)
-            Rz = rot_z(float(problem.farm.myaw[turb_i]))
+            Rz = rot_z(float(inputs['yaw']))
 
             # Rotate the blade velocity in the global x, y, z, coordinate system
             # Note: blade_vel_base is negative since we seek the velocity of the fluid relative to a stationary blade
             # and blade_vel_base is defined based on the movement of the blade
             blade_vel_temp = np.dot(Rx, -blade_vel_base)
             blade_vel = np.dot(Rz, blade_vel_temp)
+            
+            # Create unit vectors aligned with blade geometry
+            # blade_unit_vec_base[:, 0] = points along rotor shaft
+            # blade_unit_vec_base[:, 1] = points along blade span axis
+            # blade_unit_vec_base[:, 2] = points tangential to blade span axis (generates a torque about rotor shaft)
+            blade_unit_vec_base = np.eye((3))
 
             # Rotate the blade unit vectors to be pointing in the rotated positions
             blade_unit_vec_temp = np.dot(Rx, blade_unit_vec_base)
             blade_unit_vec = np.dot(Rz, blade_unit_vec_temp)
-
-            # Rotate the entire [x; y; z] matrix using this matrix, then shift to the hub location
-            blade_pos = np.dot(Rz, np.dot(Rx, blade_pos_base))
-            blade_pos[0, :] += problem.farm.x[turb_i]
-            blade_pos[1, :] += problem.farm.y[turb_i]
-            blade_pos[2, :] += problem.farm.z[turb_i]
-
-            time_offset = 1
-            if simTime_id < time_offset:
-                theta_behind = (
-                    theta_0
-                    + 0.5
-                    * (problem.simTime_list[simTime_id] + simTime)
-                    / period
-                    * 2.0
-                    * np.pi
-                )
-            else:
-                theta_behind = (
-                    theta_0
-                    + 0.5
-                    * (problem.simTime_list[simTime_id - time_offset] + simTime)
-                    / period
-                    * 2.0
-                    * np.pi
-                )
-
-            Rx_alt = rot_x(theta_behind)
-            temp = np.dot(Rx_alt, blade_pos_base)
-            blade_pos_alt = np.dot(Rz, temp)
-            blade_pos_alt[0, :] += problem.farm.x[turb_i]
-            blade_pos_alt[1, :] += problem.farm.y[turb_i]
-            blade_pos_alt[2, :] += problem.farm.z[turb_i]
-
+            
             # Initialize space to hold the fluid velocity at each actuator node
             u_fluid = np.zeros((3, problem.num_blade_segments))
 
@@ -298,17 +252,12 @@ class FullALM(om.ExplicitComponent):
             for k in range(problem.num_blade_segments):
                 
                 # Hardcoding a uniform flow field for now
-                u_fluid[:, k] = u_local.copy()
+                u_fluid[:, k] = inputs['u_local']
 
                 u_fluid[:, k] -= (
                     np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
                 )
-
-            for k in range(problem.num_blade_segments):
-                u_fluid[:, k] -= (
-                    np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
-                )
-
+                
             # Form the total relative velocity vector (including velocity from rotating blade)
             u_rel = u_fluid + blade_vel
 
@@ -324,6 +273,12 @@ class FullALM(om.ExplicitComponent):
             # Calculate the lift and drag forces using the relative velocity magnitude
             lift = tip_loss * (0.5 * cl * rho * c * width * u_rel_mag ** 2)
             drag = tip_loss * (0.5 * cd * rho * c * width * u_rel_mag ** 2)
+            
+            # Rotate the entire [x; y; z] matrix using this matrix, then shift to the hub location
+            blade_pos = np.dot(Rz, np.dot(Rx, blade_pos_base))
+            blade_pos[0, :] += problem.farm.x[turb_i]
+            blade_pos[1, :] += problem.farm.y[turb_i]
+            blade_pos[2, :] += problem.farm.z[turb_i]
 
             # Tile the blade coordinates for every mesh point, [numGridPts*ndim x problem.num_blade_segments]
             blade_pos_full = np.tile(blade_pos, (np.shape(problem.coords)[0], 1))
@@ -337,7 +292,7 @@ class FullALM(om.ExplicitComponent):
             # Calculate the force magnitude at every mesh point due to every node [numGridPts x NumActuators]
             nodal_lift = lift * np.exp(-dist2 / eps ** 2) / (eps ** 3 * np.pi ** 1.5)
             nodal_drag = drag * np.exp(-dist2 / eps ** 2) / (eps ** 3 * np.pi ** 1.5)
-
+            
             for k in range(problem.num_blade_segments):
                 # The drag unit simply points opposite the relative velocity unit vector
                 drag_unit_vec = -np.copy(u_unit_vec[:, k])
@@ -354,21 +309,14 @@ class FullALM(om.ExplicitComponent):
 
         # The total turbine force is the sum of lift and drag effects
         turbine_force = drag_force + lift_force
-        turbine_force_for_power = -drag_force + lift_force
 
         # Riffle-shuffle the x-, y-, and z-column force components
         for k in range(ndim):
             tf_vec[k::ndim] = turbine_force[:, k]
-            tf_vec_for_power[k::ndim] = turbine_force_for_power[:, k]
 
         # Remove near-zero values
         tf_vec[np.abs(tf_vec) < 1e-12] = 0.0
 
-        # Add to the cumulative turbine force
-        tf.vector()[:] += tf_vec
-
         problem.first_call_to_alm = False
 
-        tf.vector().update_ghost_values()
-
-        outputs['turbine_forces'] = np.array(tf.vector()[:])
+        outputs['turbine_forces'] = tf_vec

@@ -8,6 +8,7 @@ from alm_class import UpdateActuatorLineForce
 from simpler_alm_class import SimplerUpdateActuatorLineForce
 import openmdao.api as om
 from full_alm_openmdao import FullALM
+from alm_group import ALMGroup
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
@@ -225,6 +226,22 @@ for k in range(tSteps):
     om_forces = prob['turbine_forces']
     
     print('om norm:', np.linalg.norm(full_tf - om_forces))
+    
+    num_blades = 3
+    prob = om.Problem()
+    prob.model.add_subsystem('ALMGroup', ALMGroup(problem=problem,
+        simTime_id=simTime_id,
+        dt=dt,
+        turb_i=turb_i,
+        num_blades=num_blades,
+        ), promotes=['*'])
+    prob.setup()
+    prob['u_local'] = [9., 0., 0.]
+    prob['yaw'] = yaw
+    prob.run_model()
+    om_forces = prob['turbine_forces']
+    
+    print('grouped om norm:', np.linalg.norm(full_tf - om_forces))
     
     
     # Increment the total simTime
