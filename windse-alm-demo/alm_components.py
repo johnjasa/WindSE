@@ -408,14 +408,14 @@ class ComputeLiftDrag(om.ExplicitComponent):
         
         arange = np.arange(self.problem.num_blade_segments)
         
-        self.declare_partials('lift', 'cl')
-        self.declare_partials('drag', 'cd')
+        self.declare_partials('lift', 'cl', rows=arange, cols=arange)
+        self.declare_partials('drag', 'cd', rows=arange, cols=arange)
         self.declare_partials('lift', 'tip_loss', rows=arange, cols=arange)
         self.declare_partials('drag', 'tip_loss', rows=arange, cols=arange)
-        self.declare_partials('lift', 'width')
-        self.declare_partials('drag', 'width')
-        self.declare_partials('lift', 'u_rel_mag')
-        self.declare_partials('drag', 'u_rel_mag')
+        self.declare_partials('lift', 'width', rows=arange, cols=arange)
+        self.declare_partials('drag', 'width', rows=arange, cols=arange)
+        self.declare_partials('lift', 'u_rel_mag', rows=arange, cols=arange)
+        self.declare_partials('drag', 'u_rel_mag', rows=arange, cols=arange)
         
     def compute(self, inputs, outputs):
         # Set the density
@@ -443,6 +443,15 @@ class ComputeLiftDrag(om.ExplicitComponent):
 
         partials['lift', 'tip_loss'] = 0.5 * cl * rho * c * width * u_rel_mag ** 2
         partials['drag', 'tip_loss'] = 0.5 * cd * rho * c * width * u_rel_mag ** 2
+
+        partials['lift', 'cl'] = 0.5 * tip_loss * rho * c * width * u_rel_mag ** 2
+        partials['drag', 'cd'] = 0.5 * tip_loss * rho * c * width * u_rel_mag ** 2
+
+        partials['lift', 'width'] = tip_loss * (0.5 * cl * rho * c * u_rel_mag ** 2)
+        partials['drag', 'width'] = tip_loss * (0.5 * cd * rho * c * u_rel_mag ** 2)
+
+        partials['lift', 'u_rel_mag'] = tip_loss * cl * rho * c * width * u_rel_mag
+        partials['drag', 'u_rel_mag'] = tip_loss * cd * rho * c * width * u_rel_mag
         
 
 class ComputeNodalLiftDrag(om.ExplicitComponent):
