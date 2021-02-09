@@ -33,10 +33,10 @@ def build_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
         # build the lift-drag table interpolators
         rdim_all = np.linspace(0, rdim[-1], np.shape(problem.lift_table)[1])
         problem.interp_lift = interp.RectBivariateSpline(
-            problem.interp_angles, rdim_all, self.problem.lift_table
+            problem.interp_angles, rdim_all, problem.lift_table
         )
         problem.interp_drag = interp.RectBivariateSpline(
-            problem.interp_angles, rdim_all, self.problem.drag_table
+            problem.interp_angles, rdim_all, problem.drag_table
         )
 
 def call_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
@@ -229,7 +229,7 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         theta = inputs['theta'] + theta_offset
 
         # Generate a rotation matrix for this turbine blade
-        outputs['Rx'] = rot_x(theta)
+        outputs['Rx'] = rot_x(float(theta))
         outputs['Rz'] = rot_z(float(inputs['yaw']))
         
 
@@ -406,6 +406,17 @@ class ComputeLiftDrag(om.ExplicitComponent):
         self.add_output('lift', shape=self.problem.num_blade_segments)
         self.add_output('drag', shape=self.problem.num_blade_segments)
         
+        arange = np.arange(self.problem.num_blade_segments)
+        
+        self.declare_partials('lift', 'cl')
+        self.declare_partials('drag', 'cd')
+        self.declare_partials('lift', 'tip_loss', rows=arange, cols=arange)
+        self.declare_partials('drag', 'tip_loss', rows=arange, cols=arange)
+        self.declare_partials('lift', 'width')
+        self.declare_partials('drag', 'width')
+        self.declare_partials('lift', 'u_rel_mag')
+        self.declare_partials('drag', 'u_rel_mag')
+        
     def compute(self, inputs, outputs):
         # Set the density
         rho = 1.0
@@ -420,6 +431,19 @@ class ComputeLiftDrag(om.ExplicitComponent):
         # Calculate the lift and drag forces using the relative velocity magnitude
         outputs['lift'] = tip_loss * (0.5 * cl * rho * c * width * u_rel_mag ** 2)
         outputs['drag'] = tip_loss * (0.5 * cd * rho * c * width * u_rel_mag ** 2)
+        
+    def compute_partials(self, inputs, partials):
+        rho = 1.0
+        c = np.array(self.problem.mchord[self.turb_i], dtype=float)
+        cl = inputs['cl']
+        cd = inputs['cd']
+        tip_loss = inputs['tip_loss']
+        width = inputs['width']
+        u_rel_mag = inputs['u_rel_mag']
+
+        partials['lift', 'tip_loss'] = 0.5 * cl * rho * c * width * u_rel_mag ** 2
+        partials['drag', 'tip_loss'] = 0.5 * cd * rho * c * width * u_rel_mag ** 2
+        
 
 class ComputeNodalLiftDrag(om.ExplicitComponent):
 
