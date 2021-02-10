@@ -77,7 +77,7 @@ hmin = mesh.hmin()/np.sqrt(3.0)
 problem.gaussian_width = 3.0*hmin
 # num_blade_segments, the number of actuator nodes (separate gaussian distributions), used to represent 
 # the blade from root to tip
-problem.num_blade_segments = 10
+problem.num_blade_segments = 4
 
 def build_lift_and_drag_tables(airfoil_data_path):
 
@@ -218,5 +218,5 @@ for k in range(tSteps):
     prob.run_model()
     om_forces = prob['turbine_forces']
     
-    prob.check_partials(compact_print=True, includes='*ComputeLiftDrag')
+    prob.check_partials(compact_print=True, includes='*ComputeUUnit')
     

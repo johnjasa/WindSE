@@ -165,7 +165,7 @@ class ALMGroup(om.Group):
 
 
         self.add_subsystem(
-            "CombineTurbineForce",
+            "ComputeTurbineForce",
             ComputeTurbineForce(
                 problem=self.problem,
                 num_blades=self.options['num_blades'],

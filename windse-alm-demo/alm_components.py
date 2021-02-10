@@ -28,7 +28,7 @@ def rot_z(theta):
 
     return Rz
 
-def build_lift_and_drag(problem, u_rel, blade_unit_vec, rdim, twist, c):
+def build_lift_and_drag(problem, rdim):
     if not hasattr(problem, "interp_lift"):
         # build the lift-drag table interpolators
         rdim_all = np.linspace(0, rdim[-1], np.shape(problem.lift_table)[1])
@@ -215,6 +215,10 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         self.add_output('Rx', shape=(3, 3))
         self.add_output('Rz', shape=(3, 3))
         
+        self.declare_partials('Rx', 'theta')
+        self.declare_partials('Rz', 'yaw')
+        
+        
     def compute(self, inputs, outputs):
         problem = self.problem
         simTime_id = self.simTime_id
@@ -232,7 +236,38 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         outputs['Rx'] = rot_x(float(theta))
         outputs['Rz'] = rot_z(float(inputs['yaw']))
         
-
+    def compute_partials(self, inputs, partials):
+        problem = self.problem
+        simTime_id = self.simTime_id
+        dt = self.dt
+            
+        simTime = problem.simTime_list[simTime_id]
+        
+        # Calculate the blade position based on current simTime and turbine RPM
+        period = 60.0 / problem.rpm
+        theta_offset = (simTime + 0.5 * dt) / period * 2.0 * np.pi
+        
+        theta = inputs['theta'] + theta_offset
+        
+        dRx = np.array(
+            [
+                [0., 0, 0],
+                [0, -np.sin(theta), -np.cos(theta)],
+                [0, np.cos(theta), -np.sin(theta)],
+            ]
+        )
+        partials['Rx', 'theta'] = dRx
+        
+        yaw = inputs['yaw']
+        dRz = np.array(
+            [
+                [-np.sin(yaw), -np.cos(yaw), 0],
+                [np.cos(yaw), -np.sin(yaw), 0],
+                [0, 0, 0.],
+            ]
+        )
+        partials['Rz', 'yaw'] = dRz
+        
 
 class ComputeBladeVel(om.ExplicitComponent):
 
@@ -254,13 +289,14 @@ class ComputeBladeVel(om.ExplicitComponent):
         self.add_output('blade_vel', shape=(3, self.problem.num_blade_segments))
         self.add_output('blade_unit_vec', shape=(3, 3))
         
-    def compute(self, inputs, outputs):
-        dfd = None
-        problem = self.problem
-        simTime_id = self.simTime_id
-        dt = self.dt
-        turb_i = self.turb_i
+        self.declare_partials('blade_unit_vec', 'Rx')
+        self.declare_partials('blade_unit_vec', 'Rz')
+        self.declare_partials('blade_vel', 'Rx')
+        self.declare_partials('blade_vel', 'Rz')
+        self.declare_partials('blade_vel', 'blade_vel_base')
         
+        
+    def compute(self, inputs, outputs):
         Rx = inputs['Rx']
         Rz = inputs['Rz']
         blade_vel_base = inputs['blade_vel_base']
@@ -268,8 +304,7 @@ class ComputeBladeVel(om.ExplicitComponent):
         # Rotate the blade velocity in the global x, y, z, coordinate system
         # Note: blade_vel_base is negative since we seek the velocity of the fluid relative to a stationary blade
         # and blade_vel_base is defined based on the movement of the blade
-        blade_vel_temp = np.dot(Rx, -blade_vel_base)
-        blade_vel = np.dot(Rz, blade_vel_temp)
+        blade_vel = np.dot(Rz, np.dot(Rx, -blade_vel_base))
         
         # Create unit vectors aligned with blade geometry
         # blade_unit_vec_base[:, 0] = points along rotor shaft
@@ -278,11 +313,26 @@ class ComputeBladeVel(om.ExplicitComponent):
         blade_unit_vec_base = np.eye((3))
 
         # Rotate the blade unit vectors to be pointing in the rotated positions
-        blade_unit_vec_temp = np.dot(Rx, blade_unit_vec_base)
-        blade_unit_vec = np.dot(Rz, blade_unit_vec_temp)
+        blade_unit_vec = np.dot(Rz, np.dot(Rx, blade_unit_vec_base))
         
         outputs['blade_vel'] = blade_vel
         outputs['blade_unit_vec'] = blade_unit_vec
+        
+    def compute_partials(self, inputs, partials):
+        Rx = inputs['Rx']
+        Rz = inputs['Rz']
+        blade_vel_base = inputs['blade_vel_base']
+        num_blade_segments = self.problem.num_blade_segments
+            
+        partials['blade_unit_vec', 'Rx'] = np.einsum('ik, jl', Rz, np.eye((3)))
+        partials['blade_unit_vec', 'Rz'] = np.einsum('ik, jl', np.eye((3)), (Rx).dot(np.eye((3))).T)
+        
+        
+        T_0 = (Rz).dot(Rx)
+        partials['blade_vel', 'blade_vel_base'] = -np.einsum('ik, jl', T_0, np.eye(num_blade_segments))
+        
+        partials['blade_vel', 'Rz'] = -np.einsum('ik, jl', np.eye(3), (Rx).dot(blade_vel_base).T)
+        partials['blade_vel', 'Rx'] = -np.einsum('ik, jl', Rz, blade_vel_base.T)
 
 
 class ComputeURel(om.ExplicitComponent):
@@ -295,14 +345,19 @@ class ComputeURel(om.ExplicitComponent):
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
-        self.turb_i = self.options['turb_i']
         
         self.add_input('blade_vel', shape=(3, self.problem.num_blade_segments))
         self.add_input('blade_unit_vec', shape=(3, 3))
         self.add_input('u_local', shape=3)
         self.add_output('u_rel', shape=(3, self.problem.num_blade_segments))
+        
+        arange = np.arange(3*self.problem.num_blade_segments)
+        self.declare_partials('u_rel', 'blade_vel', rows=arange, cols=arange, val=1.)
+        
+        rows = np.arange(3*self.problem.num_blade_segments)
+        cols = np.repeat([0, 1, 2], self.problem.num_blade_segments)
+        self.declare_partials('u_rel', 'u_local', rows=rows, cols=cols, val=1.)
+        self.declare_partials('u_rel', 'blade_unit_vec', method='cs')
         
     def compute(self, inputs, outputs):
         problem = self.problem
@@ -314,17 +369,13 @@ class ComputeURel(om.ExplicitComponent):
 
         # Generate the fluid velocity from the actual node locations in the flow
         for k in range(problem.num_blade_segments):
-            
-            # Hardcoding a uniform flow field for now
-            u_fluid[:, k] = inputs['u_local']
-
-            u_fluid[:, k] -= (
+        
+            u_fluid[:, k] = inputs['u_local'] - (
                 np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
             )
             
         # Form the total relative velocity vector (including velocity from rotating blade)
         outputs['u_rel'] = u_fluid + blade_vel
-        
         
         
 class ComputeUUnit(om.ExplicitComponent):
@@ -334,16 +385,34 @@ class ComputeUUnit(om.ExplicitComponent):
         
     def setup(self):
         self.problem = self.options['problem']
+        num_blade_segments = self.problem.num_blade_segments
         
-        self.add_input('u_rel', shape=(3, self.problem.num_blade_segments))
-        self.add_output('u_unit_vec', shape=(3, self.problem.num_blade_segments))
-        self.add_output('u_rel_mag', shape=self.problem.num_blade_segments)
+        self.add_input('u_rel', shape=(3, num_blade_segments))
+        self.add_output('u_unit_vec', shape=(3, num_blade_segments))
+        self.add_output('u_rel_mag', shape=num_blade_segments)
+        
+        rows = np.repeat(np.arange(num_blade_segments), 3)
+        cols = []
+        for i in range(num_blade_segments):
+            cols.append(np.arange(3)*num_blade_segments + i)
+        cols = np.array(cols).flatten()
+        
+        self.declare_partials('u_rel_mag', 'u_rel', rows=rows, cols=cols)
+        self.declare_partials('u_unit_vec', 'u_rel')
+        
         
     def compute(self, inputs, outputs):
         u_rel_mag = np.linalg.norm(inputs['u_rel'], axis=0)
         u_rel_mag[u_rel_mag < 1e-6] = 1e-6
         outputs['u_rel_mag'] = u_rel_mag
         outputs['u_unit_vec'] = inputs['u_rel'] / u_rel_mag
+        
+    def compute_partials(self, inputs, partials):
+        u_rel = inputs['u_rel']
+        t_0 = np.linalg.norm(inputs['u_rel'], axis=0)
+        partials['u_rel_mag', 'u_rel'] = ((1 / t_0) * u_rel).flatten(order='F')
+        
+
         
 
 class ComputeCLCD(om.ExplicitComponent):
@@ -374,7 +443,7 @@ class ComputeCLCD(om.ExplicitComponent):
         twist = np.array(self.problem.mtwist[self.turb_i], dtype=float)
         c = np.array(self.problem.mchord[self.turb_i], dtype=float)
         
-        build_lift_and_drag(self.problem, u_rel, blade_unit_vec, rdim, twist, c)
+        build_lift_and_drag(self.problem, rdim)
         cl, cd, tip_loss = call_lift_and_drag(
             self.problem, u_rel, blade_unit_vec, rdim, twist, c
         )
@@ -568,9 +637,15 @@ class ComputeTurbineForce(om.ExplicitComponent):
         self.problem = self.options['problem']
         ndim = self.problem.dom.dim
         
+        arange = np.arange(375)
+        
         for i_blade in range(self.options['num_blades']):
             self.add_input(f'lift_force_{i_blade}', shape=(125, ndim))
             self.add_input(f'drag_force_{i_blade}', shape=(125, ndim))
+            
+            self.declare_partials('turbine_forces', f'lift_force_{i_blade}', rows=arange, cols=arange, val=1.)
+            self.declare_partials('turbine_forces', f'drag_force_{i_blade}', rows=arange, cols=arange, val=1.)
+            
         self.add_output('turbine_forces', shape=375)
         
     def compute(self, inputs, outputs):
