@@ -218,5 +218,6 @@ for k in range(tSteps):
     prob.run_model()
     om_forces = prob['turbine_forces']
     
-    prob.check_partials(compact_print=True, includes='*ComputeUUnit')
+    check_partials_data = prob.check_partials(compact_print=True)#, includes='*ComputeLiftDragForces')
     
+    # om.partial_deriv_plot('drag_force', 'nodal_drag', check_partials_data, binary=False)

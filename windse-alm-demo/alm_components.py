@@ -111,13 +111,11 @@ class Preprocess(om.ExplicitComponent):
     def initialize(self):
         self.options.declare('problem', types=object)
         self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
         self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
         self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
         self.turb_i = self.options['turb_i']
         
         self.add_output('theta_vec', shape=num_blades)
@@ -130,7 +128,6 @@ class Preprocess(om.ExplicitComponent):
         dfd = None
         problem = self.problem
         simTime_id = self.simTime_id
-        dt = self.dt
         turb_i = self.turb_i
             
         simTime = problem.simTime_list[simTime_id]
@@ -203,7 +200,6 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         self.options.declare('problem', types=object)
         self.options.declare('simTime_id', types=int)
         self.options.declare('dt', types=float)
-        self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
@@ -217,8 +213,7 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         
         self.declare_partials('Rx', 'theta')
         self.declare_partials('Rz', 'yaw')
-        
-        
+                
     def compute(self, inputs, outputs):
         problem = self.problem
         simTime_id = self.simTime_id
@@ -273,15 +268,9 @@ class ComputeBladeVel(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
-        self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
-        self.turb_i = self.options['turb_i']
         
         self.add_input('Rx', shape=(3, 3))
         self.add_input('Rz', shape=(3, 3))
@@ -327,7 +316,6 @@ class ComputeBladeVel(om.ExplicitComponent):
         partials['blade_unit_vec', 'Rx'] = np.einsum('ik, jl', Rz, np.eye((3)))
         partials['blade_unit_vec', 'Rz'] = np.einsum('ik, jl', np.eye((3)), (Rx).dot(np.eye((3))).T)
         
-        
         T_0 = (Rz).dot(Rx)
         partials['blade_vel', 'blade_vel_base'] = -np.einsum('ik, jl', T_0, np.eye(num_blade_segments))
         
@@ -339,9 +327,6 @@ class ComputeURel(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
-        self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
@@ -398,7 +383,7 @@ class ComputeUUnit(om.ExplicitComponent):
         cols = np.array(cols).flatten()
         
         self.declare_partials('u_rel_mag', 'u_rel', rows=rows, cols=cols)
-        self.declare_partials('u_unit_vec', 'u_rel')
+        self.declare_partials('u_unit_vec', 'u_rel', method='fd')
         
         
     def compute(self, inputs, outputs):
@@ -411,22 +396,16 @@ class ComputeUUnit(om.ExplicitComponent):
         u_rel = inputs['u_rel']
         t_0 = np.linalg.norm(inputs['u_rel'], axis=0)
         partials['u_rel_mag', 'u_rel'] = ((1 / t_0) * u_rel).flatten(order='F')
-        
 
-        
 
 class ComputeCLCD(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
         self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
         self.turb_i = self.options['turb_i']
         
         self.add_input('u_rel', shape=(3, self.problem.num_blade_segments))
@@ -435,6 +414,11 @@ class ComputeCLCD(om.ExplicitComponent):
         self.add_output('cl', shape=self.problem.num_blade_segments)
         self.add_output('cd', shape=self.problem.num_blade_segments)
         self.add_output('tip_loss', shape=self.problem.num_blade_segments)
+        
+        self.declare_partials('*', '*')
+        
+        self.declare_coloring(wrt='*', method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+                      orders=20, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
         u_rel = inputs['u_rel']
@@ -457,14 +441,10 @@ class ComputeLiftDrag(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
         self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
         self.turb_i = self.options['turb_i']
         
         self.add_input('cl', shape=self.problem.num_blade_segments)
@@ -527,14 +507,10 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
         self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
         self.turb_i = self.options['turb_i']
         
         self.add_input('blade_pos_base', shape=(3, self.problem.num_blade_segments))
@@ -545,14 +521,22 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
         self.add_output('nodal_lift', shape=(125, self.problem.num_blade_segments))
         self.add_output('nodal_drag', shape=(125, self.problem.num_blade_segments))
         
+        self.declare_partials('nodal_lift', 'lift')
+        self.declare_partials('nodal_lift', 'blade_pos_base')
+        self.declare_partials('nodal_lift', 'Rx')
+        self.declare_partials('nodal_lift', 'Rz')
+        self.declare_partials('nodal_drag', 'drag')
+        self.declare_partials('nodal_drag', 'blade_pos_base')
+        self.declare_partials('nodal_drag', 'Rx')
+        self.declare_partials('nodal_drag', 'Rz')
+        
+        self.declare_coloring(wrt='*', method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+                      orders=20, show_summary=False, show_sparsity=False)
+        
     def compute(self, inputs, outputs):
-        dfd = None
         problem = self.problem
-        simTime_id = self.simTime_id
-        dt = self.dt
         turb_i = self.turb_i
             
-        simTime = problem.simTime_list[simTime_id]
         ndim = problem.dom.dim
         eps = problem.gaussian_width
         
@@ -584,15 +568,9 @@ class ComputeLiftDragForces(om.ExplicitComponent):
 
     def initialize(self):
         self.options.declare('problem', types=object)
-        self.options.declare('simTime_id', types=int)
-        self.options.declare('dt', types=float)
-        self.options.declare('turb_i', types=int)
         
     def setup(self):
         self.problem = self.options['problem']
-        self.simTime_id = self.options['simTime_id']
-        self.dt = self.options['dt']
-        self.turb_i = self.options['turb_i']
         ndim = self.problem.dom.dim
         
         self.add_input('u_unit_vec', shape=(3, self.problem.num_blade_segments))
@@ -602,30 +580,26 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         self.add_output('lift_force', shape=(125, ndim))
         self.add_output('drag_force', shape=(125, ndim))
         
+        self.declare_partials('drag_force', 'nodal_drag')
+        self.declare_partials('drag_force', 'u_unit_vec')
+        self.declare_partials('lift_force', 'nodal_lift')
+        self.declare_partials('lift_force', 'u_unit_vec')
+        self.declare_partials('lift_force', 'blade_unit_vec')
+        
+        self.declare_coloring(wrt='*', method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+                      orders=20, show_summary=False, show_sparsity=False)
+        
     def compute(self, inputs, outputs):
-        problem = self.problem
         u_unit_vec = inputs['u_unit_vec']
         blade_unit_vec = inputs['blade_unit_vec']
         nodal_lift = inputs['nodal_lift']
         nodal_drag = inputs['nodal_drag']
         
-        outputs['lift_force'][:] = 0.
-        outputs['drag_force'][:] = 0.
+        outputs['drag_force'] = np.einsum('ij,jk->ik', nodal_drag, -u_unit_vec.T)
         
-        for k in range(problem.num_blade_segments):
-            # The drag unit simply points opposite the relative velocity unit vector
-            drag_unit_vec = -np.copy(u_unit_vec[:, k])
-
-            # The lift is normal to the plane generated by the blade and relative velocity
-            lift_unit_vec = np.cross(drag_unit_vec, blade_unit_vec[:, 1])
-
-            # All force magnitudes get multiplied by the correctly-oriented unit vector
-            vector_nodal_lift = np.outer(nodal_lift[:, k], lift_unit_vec)
-            vector_nodal_drag = np.outer(nodal_drag[:, k], drag_unit_vec)
-
-            outputs['lift_force'] += vector_nodal_lift
-            outputs['drag_force'] += vector_nodal_drag
-    
+        lift_unit_vec = np.cross(-u_unit_vec, blade_unit_vec[:, 1], axisa=0)
+        outputs['lift_force'] = np.einsum('ij,jk->ik', nodal_lift, lift_unit_vec)
+        
 
 class ComputeTurbineForce(om.ExplicitComponent):
 

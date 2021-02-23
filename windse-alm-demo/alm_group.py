@@ -35,7 +35,6 @@ class ALMBlade(om.Group):
                 problem=self.problem,
                 simTime_id=self.simTime_id,
                 dt=self.dt,
-                turb_i=self.turb_i,
             ),
             promotes=["*"],
         )
@@ -44,9 +43,6 @@ class ALMBlade(om.Group):
             "ComputeBladeVel",
             ComputeBladeVel(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
-                turb_i=self.turb_i,
             ),
             promotes=["*"],
         )
@@ -55,9 +51,6 @@ class ALMBlade(om.Group):
             "ComputeURel",
             ComputeURel(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
-                turb_i=self.turb_i,
             ),
             promotes=["*"],
         )
@@ -74,8 +67,6 @@ class ALMBlade(om.Group):
             "ComputeCLCD",
             ComputeCLCD(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
                 turb_i=self.turb_i,
             ),
             promotes=["*"],
@@ -85,8 +76,6 @@ class ALMBlade(om.Group):
             "ComputeLiftDrag",
             ComputeLiftDrag(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
                 turb_i=self.turb_i,
             ),
             promotes=["*"],
@@ -96,8 +85,6 @@ class ALMBlade(om.Group):
             "ComputeNodalLiftDrag",
             ComputeNodalLiftDrag(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
                 turb_i=self.turb_i,
             ),
             promotes=["*"],
@@ -107,9 +94,6 @@ class ALMBlade(om.Group):
             "ComputeLiftDragForces",
             ComputeLiftDragForces(
                 problem=self.problem,
-                simTime_id=self.simTime_id,
-                dt=self.dt,
-                turb_i=self.turb_i,
             ),
             promotes=["*"],
         )
@@ -134,7 +118,6 @@ class ALMGroup(om.Group):
             Preprocess(
                 problem=self.problem,
                 simTime_id=self.simTime_id,
-                dt=self.dt,
                 turb_i=self.turb_i,
             ),
             promotes=["*"],
