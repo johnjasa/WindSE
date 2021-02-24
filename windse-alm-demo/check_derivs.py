@@ -12,7 +12,7 @@ from alm_group import ALMGroup
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
-res = 1
+res = 15
 
 mesh = BoxMesh(Point(-100, -100, 0),
               Point(100, 100, 200),
@@ -218,11 +218,11 @@ for k in range(tSteps):
     prob.run_model()
     om_forces = prob['turbine_forces']
     
-    # totals = prob.compute_totals('turbine_forces', 'u_local')
+    totals = prob.compute_totals('turbine_forces', 'u_local')
     # print(totals)
     
-    check_partials_data = prob.check_partials(compact_print=True, includes='*ComputeLiftDragForces')
-    
-    om.partial_deriv_plot('lift_force', 'u_unit_vec', check_partials_data, binary=False)
-    om.partial_deriv_plot('lift_force', 'blade_unit_vec', check_partials_data, binary=False)
-    
+    # check_partials_data = prob.check_partials(compact_print=True, includes='*ComputeLiftDragForces')
+    # 
+    # om.partial_deriv_plot('lift_force', 'u_unit_vec', check_partials_data, binary=False)
+    # om.partial_deriv_plot('lift_force', 'blade_unit_vec', check_partials_data, binary=False)
+    # 

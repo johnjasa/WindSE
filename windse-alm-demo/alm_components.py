@@ -532,7 +532,7 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
         self.declare_partials('nodal_drag', 'Rz')
         
         self.declare_coloring(wrt='*', method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
-                      orders=20, show_summary=False, show_sparsity=False)
+                      orders=40, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
         problem = self.problem
