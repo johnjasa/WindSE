@@ -89,7 +89,7 @@ class ALMBlade(om.Group):
             ),
             promotes=["*"],
         )
-
+        
         self.add_subsystem(
             "ComputeLiftDragForces",
             ComputeLiftDragForces(

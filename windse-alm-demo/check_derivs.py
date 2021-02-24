@@ -223,4 +223,6 @@ for k in range(tSteps):
     
     check_partials_data = prob.check_partials(compact_print=True, includes='*ComputeLiftDragForces')
     
-    om.partial_deriv_plot('drag_force', 'u_unit_vec', check_partials_data, binary=False)
+    om.partial_deriv_plot('lift_force', 'u_unit_vec', check_partials_data, binary=False)
+    om.partial_deriv_plot('lift_force', 'blade_unit_vec', check_partials_data, binary=False)
+    

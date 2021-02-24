@@ -563,8 +563,7 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
         # Calculate the force magnitude at every mesh point due to every node [numGridPts x NumActuators]
         outputs['nodal_lift'] = inputs['lift'] * np.exp(-dist2 / eps ** 2) / (eps ** 3 * np.pi ** 1.5)
         outputs['nodal_drag'] = inputs['drag'] * np.exp(-dist2 / eps ** 2) / (eps ** 3 * np.pi ** 1.5)
-    
-
+        
 class ComputeLiftDragForces(om.ExplicitComponent):
 
     def initialize(self):
@@ -583,6 +582,9 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         self.add_output('lift_force', shape=(n_points, ndim))
         self.add_output('drag_force', shape=(n_points, ndim))
         
+        self.declare_coloring(wrt=['u_unit_vec', 'blade_unit_vec'], method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+              orders=20, show_summary=False, show_sparsity=False)
+        
         rows = []
         for i in range(n_points):
             rows.extend(np.tile(np.arange(ndim)+i*ndim, num_blade_segs))
@@ -600,13 +602,15 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         cols = np.tile(cols, n_points)
         self.declare_partials('drag_force', 'u_unit_vec', rows=rows, cols=cols)
         
-        self.declare_partials('drag_force', 'nodal_drag')
-        self.declare_partials('lift_force', 'nodal_lift')
-        self.declare_partials('lift_force', 'u_unit_vec')
-        self.declare_partials('lift_force', 'blade_unit_vec')
+        rows = []
+        for i in range(n_points):
+            rows.extend(np.tile(np.arange(ndim)+i*ndim, num_blade_segs))
+        cols = []
+        for i in range(n_points):
+            cols.extend(np.repeat(np.arange(num_blade_segs)+i*num_blade_segs, ndim))
+        self.declare_partials('lift_force', 'nodal_lift', rows=rows, cols=cols)
         
-        # self.declare_coloring(wrt=['u_unit_vec', 'blade_unit_vec', 'nodal_lift'], method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
-        #               orders=20, show_summary=False, show_sparsity=False)
+        self.declare_partials('lift_force', ['u_unit_vec', 'blade_unit_vec'])
         
     def compute(self, inputs, outputs):
         u_unit_vec = inputs['u_unit_vec']
@@ -614,9 +618,9 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         nodal_lift = inputs['nodal_lift']
         nodal_drag = inputs['nodal_drag']
         
-        outputs['drag_force'] = np.einsum('ij,jk->ik', nodal_drag, -u_unit_vec.T)
-        
         lift_unit_vec = np.cross(-u_unit_vec, blade_unit_vec[:, 1], axisa=0)
+        
+        outputs['drag_force'] = np.einsum('ij,jk->ik', nodal_drag, -u_unit_vec.T)
         outputs['lift_force'] = np.einsum('ij,jk->ik', nodal_lift, lift_unit_vec)
 
     def compute_partials(self, inputs, partials):
@@ -634,6 +638,11 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         
         derivs = np.repeat(-nodal_drag.T.flatten(order='F'), ndim)
         partials['drag_force', 'u_unit_vec'] = derivs
+        
+        lift_unit_vec = np.cross(-u_unit_vec, blade_unit_vec[:, 1], axisa=0)
+
+        derivs = np.tile(lift_unit_vec.flatten(), n_points)
+        partials['lift_force', 'nodal_lift'] = derivs
         
 
 class ComputeTurbineForce(om.ExplicitComponent):
