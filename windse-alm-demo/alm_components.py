@@ -512,14 +512,15 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
     def setup(self):
         self.problem = self.options['problem']
         self.turb_i = self.options['turb_i']
+        n_points = self.problem.coords.shape[0]
         
         self.add_input('blade_pos_base', shape=(3, self.problem.num_blade_segments))
         self.add_input('Rx', shape=(3, 3))
         self.add_input('Rz', shape=(3, 3))
         self.add_input('lift', shape=self.problem.num_blade_segments)
         self.add_input('drag', shape=self.problem.num_blade_segments)
-        self.add_output('nodal_lift', shape=(125, self.problem.num_blade_segments))
-        self.add_output('nodal_drag', shape=(125, self.problem.num_blade_segments))
+        self.add_output('nodal_lift', shape=(n_points, self.problem.num_blade_segments))
+        self.add_output('nodal_drag', shape=(n_points, self.problem.num_blade_segments))
         
         self.declare_partials('nodal_lift', 'lift')
         self.declare_partials('nodal_lift', 'blade_pos_base')
@@ -572,22 +573,40 @@ class ComputeLiftDragForces(om.ExplicitComponent):
     def setup(self):
         self.problem = self.options['problem']
         ndim = self.problem.dom.dim
+        n_points = self.problem.coords.shape[0]
+        num_blade_segs = self.problem.num_blade_segments
         
-        self.add_input('u_unit_vec', shape=(3, self.problem.num_blade_segments))
+        self.add_input('u_unit_vec', shape=(3, num_blade_segs))
         self.add_input('blade_unit_vec', shape=(3, 3))
-        self.add_input('nodal_lift', shape=(125, self.problem.num_blade_segments))
-        self.add_input('nodal_drag', shape=(125, self.problem.num_blade_segments))
-        self.add_output('lift_force', shape=(125, ndim))
-        self.add_output('drag_force', shape=(125, ndim))
+        self.add_input('nodal_lift', shape=(n_points, num_blade_segs))
+        self.add_input('nodal_drag', shape=(n_points, num_blade_segs))
+        self.add_output('lift_force', shape=(n_points, ndim))
+        self.add_output('drag_force', shape=(n_points, ndim))
+        
+        rows = []
+        for i in range(n_points):
+            rows.extend(np.tile(np.arange(ndim)+i*ndim, num_blade_segs))
+        cols = []
+        for i in range(n_points):
+            cols.extend(np.repeat(np.arange(num_blade_segs)+i*num_blade_segs, ndim))
+        self.declare_partials('drag_force', 'nodal_drag', rows=rows, cols=cols)
+        
+        rows = []
+        for i in range(n_points):
+            rows.extend(np.tile(np.arange(ndim), num_blade_segs)+i*ndim)
+        cols = []
+        for i in range(num_blade_segs):
+            cols.extend(np.arange(ndim)*num_blade_segs + i)
+        cols = np.tile(cols, n_points)
+        self.declare_partials('drag_force', 'u_unit_vec', rows=rows, cols=cols)
         
         self.declare_partials('drag_force', 'nodal_drag')
-        self.declare_partials('drag_force', 'u_unit_vec')
         self.declare_partials('lift_force', 'nodal_lift')
         self.declare_partials('lift_force', 'u_unit_vec')
         self.declare_partials('lift_force', 'blade_unit_vec')
         
-        self.declare_coloring(wrt='*', method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
-                      orders=20, show_summary=False, show_sparsity=False)
+        # self.declare_coloring(wrt=['u_unit_vec', 'blade_unit_vec', 'nodal_lift'], method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+        #               orders=20, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
         u_unit_vec = inputs['u_unit_vec']
@@ -599,6 +618,22 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         
         lift_unit_vec = np.cross(-u_unit_vec, blade_unit_vec[:, 1], axisa=0)
         outputs['lift_force'] = np.einsum('ij,jk->ik', nodal_lift, lift_unit_vec)
+
+    def compute_partials(self, inputs, partials):
+        ndim = self.problem.dom.dim
+        n_points = self.problem.coords.shape[0]
+        num_blade_segs = self.problem.num_blade_segments
+        
+        u_unit_vec = inputs['u_unit_vec']
+        blade_unit_vec = inputs['blade_unit_vec']
+        nodal_lift = inputs['nodal_lift']
+        nodal_drag = inputs['nodal_drag']
+        
+        derivs = np.tile(-u_unit_vec.T.flatten(), n_points)
+        partials['drag_force', 'nodal_drag'] = derivs
+        
+        derivs = np.repeat(-nodal_drag.T.flatten(order='F'), ndim)
+        partials['drag_force', 'u_unit_vec'] = derivs
         
 
 class ComputeTurbineForce(om.ExplicitComponent):
@@ -610,17 +645,18 @@ class ComputeTurbineForce(om.ExplicitComponent):
     def setup(self):
         self.problem = self.options['problem']
         ndim = self.problem.dom.dim
+        n_points = self.problem.coords.shape[0]
         
-        arange = np.arange(375)
+        arange = np.arange(n_points * ndim)
         
         for i_blade in range(self.options['num_blades']):
-            self.add_input(f'lift_force_{i_blade}', shape=(125, ndim))
-            self.add_input(f'drag_force_{i_blade}', shape=(125, ndim))
+            self.add_input(f'lift_force_{i_blade}', shape=(n_points, ndim))
+            self.add_input(f'drag_force_{i_blade}', shape=(n_points, ndim))
             
             self.declare_partials('turbine_forces', f'lift_force_{i_blade}', rows=arange, cols=arange, val=1.)
             self.declare_partials('turbine_forces', f'drag_force_{i_blade}', rows=arange, cols=arange, val=1.)
             
-        self.add_output('turbine_forces', shape=375)
+        self.add_output('turbine_forces', shape=n_points * ndim)
         
     def compute(self, inputs, outputs):
         problem = self.problem
