@@ -321,6 +321,92 @@ class ComputeBladeVel(om.ExplicitComponent):
         
         partials['blade_vel', 'Rz'] = -np.einsum('ik, jl', np.eye(3), (Rx).dot(blade_vel_base).T)
         partials['blade_vel', 'Rx'] = -np.einsum('ik, jl', Rz, blade_vel_base.T)
+        
+        
+        
+class ComputeBladePosAlt(om.ExplicitComponent):
+    
+    def initialize(self):
+        self.options.declare('problem', types=object)
+        self.options.declare('simTime_id', types=int)
+        self.options.declare('turb_i', types=int)
+        
+    def setup(self):
+        self.problem = self.options['problem']
+        self.simTime_id = self.options['simTime_id']
+        self.turb_i = self.options['turb_i']
+        
+        self.add_input('theta', val=0.)
+        self.add_input('Rz', shape=(3, 3))
+        self.add_input('blade_pos_base', shape=(3, self.problem.num_blade_segments))
+        self.add_output('blade_pos_alt', shape=(3, self.problem.num_blade_segments))
+        
+        # TODO: Might be CS safe; give it a shot
+        self.declare_coloring(wrt=['theta', 'blade_pos_base', 'Rz'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+              orders=20, show_summary=False, show_sparsity=False)
+        
+    def compute(self, inputs, outputs):
+        problem = self.problem
+        simTime_id = self.simTime_id
+        simTime = problem.simTime_list[simTime_id]
+        period = 60.0 / problem.rpm
+        theta = inputs['theta']
+        Rz = inputs['Rz']
+        
+        time_offset = 1
+        if simTime_id < time_offset:
+           theta_behind = (
+               theta
+               + 0.5
+               * (problem.simTime_list[simTime_id] + simTime)
+               / period
+               * 2.0
+               * np.pi
+           )
+        else:
+           theta_behind = (
+               theta
+               + 0.5
+               * (problem.simTime_list[simTime_id - time_offset] + simTime)
+               / period
+               * 2.0
+               * np.pi
+           )
+
+        Rx_alt = rot_x(theta_behind)
+        temp = np.dot(Rx_alt, inputs['blade_pos_base'])
+        blade_pos_alt = np.dot(Rz, temp)
+        blade_pos_alt[0, :] += problem.farm.x[self.turb_i]
+        blade_pos_alt[1, :] += problem.farm.y[self.turb_i]
+        blade_pos_alt[2, :] += problem.farm.z[self.turb_i]
+        outputs['blade_pos_alt'] = blade_pos_alt
+        
+        
+class ComputeULocal(om.ExplicitComponent):
+    
+    def initialize(self):
+        self.options.declare('u_local', types=object)
+        self.options.declare('problem', types=object)
+        
+    def setup(self):
+        self.problem = self.options['problem']
+        ndim = self.problem.dom.dim
+        n_points = self.problem.coords.shape[0]
+        self.u_local = self.options['u_local']
+        
+        self.add_input('blade_pos_alt', shape=(3, self.problem.num_blade_segments))
+        self.add_output('u_local', shape=(3, self.problem.num_blade_segments))
+        
+        # TODO: Might be CS safe; give it a shot
+        self.declare_coloring(wrt=['blade_pos_alt'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+              orders=20, show_summary=False, show_sparsity=False)
+        
+    def compute(self, inputs, outputs):
+        blade_pos_alt = inputs['blade_pos_alt']
+        for k in range(self.problem.num_blade_segments):
+            outputs['u_local'][:, k] = self.u_local(blade_pos_alt[0, k],
+                 blade_pos_alt[1, k],
+                 blade_pos_alt[2, k])
 
 
 class ComputeURel(om.ExplicitComponent):
@@ -333,15 +419,16 @@ class ComputeURel(om.ExplicitComponent):
         
         self.add_input('blade_vel', shape=(3, self.problem.num_blade_segments))
         self.add_input('blade_unit_vec', shape=(3, 3))
-        self.add_input('u_local', shape=3)
+        self.add_input('u_local', shape=(3, self.problem.num_blade_segments))
         self.add_output('u_rel', shape=(3, self.problem.num_blade_segments))
         
         arange = np.arange(3*self.problem.num_blade_segments)
         self.declare_partials('u_rel', 'blade_vel', rows=arange, cols=arange, val=1.)
         
-        rows = np.arange(3*self.problem.num_blade_segments)
-        cols = np.repeat([0, 1, 2], self.problem.num_blade_segments)
-        self.declare_partials('u_rel', 'u_local', rows=rows, cols=cols, val=1.)
+        # TODO : compute derivs for u_local
+        # rows = np.arange(3*self.problem.num_blade_segments)
+        # cols = np.repeat([0, 1, 2], self.problem.num_blade_segments)
+        # self.declare_partials('u_rel', 'u_local', rows=rows, cols=cols, val=1.)
         self.declare_partials('u_rel', 'blade_unit_vec', method='cs')
         
     def compute(self, inputs, outputs):
@@ -355,7 +442,7 @@ class ComputeURel(om.ExplicitComponent):
         # Generate the fluid velocity from the actual node locations in the flow
         for k in range(problem.num_blade_segments):
         
-            u_fluid[:, k] = inputs['u_local'] - (
+            u_fluid[:, k] = inputs['u_local'][:, k] - (
                 np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
             )
             
@@ -531,6 +618,7 @@ class ComputeNodalLiftDrag(om.ExplicitComponent):
         self.declare_partials('nodal_drag', 'Rx')
         self.declare_partials('nodal_drag', 'Rz')
         
+        # TODO : should this be a finer perturb_size?
         self.declare_coloring(wrt='*', method='cs', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
                       orders=40, show_summary=False, show_sparsity=False)
         
@@ -688,3 +776,5 @@ class ComputeTurbineForce(om.ExplicitComponent):
         problem.first_call_to_alm = False
 
         outputs['turbine_forces'] = tf_vec
+        
+        

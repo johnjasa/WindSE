@@ -6,6 +6,8 @@ from alm_components import (
     Preprocess,
     ComputeRotationMatrices,
     ComputeBladeVel,
+    ComputeBladePosAlt,
+    ComputeULocal,
     ComputeURel,
     ComputeUUnit,
     ComputeCLCD,
@@ -22,12 +24,14 @@ class ALMBlade(om.Group):
         self.options.declare("simTime_id", types=int)
         self.options.declare("dt", types=float)
         self.options.declare("turb_i", types=int)
+        self.options.declare("u_local", types=object)
 
     def setup(self):
         self.problem = self.options["problem"]
         self.simTime_id = self.options["simTime_id"]
         self.dt = self.options["dt"]
         self.turb_i = self.options["turb_i"]
+        self.u_local = self.options["u_local"]
 
         self.add_subsystem(
             "ComputeRotationMatrices",
@@ -43,6 +47,25 @@ class ALMBlade(om.Group):
             "ComputeBladeVel",
             ComputeBladeVel(
                 problem=self.problem,
+            ),
+            promotes=["*"],
+        )
+        
+        self.add_subsystem(
+            "ComputeBladePosAlt",
+            ComputeBladePosAlt(
+                problem=self.problem,
+                simTime_id=self.simTime_id,
+                turb_i=self.turb_i,
+            ),
+            promotes=["*"],
+        )
+        
+        self.add_subsystem(
+            "ComputeULocal",
+            ComputeULocal(
+                problem=self.problem,
+                u_local=self.u_local,
             ),
             promotes=["*"],
         )
@@ -106,12 +129,14 @@ class ALMGroup(om.Group):
         self.options.declare("dt", types=float)
         self.options.declare("turb_i", types=int)
         self.options.declare("num_blades", types=int)
+        self.options.declare("u_local", types=object)
 
     def setup(self):
         self.problem = self.options["problem"]
         self.simTime_id = self.options["simTime_id"]
         self.dt = self.options["dt"]
         self.turb_i = self.options["turb_i"]
+        self.u_local = self.options["u_local"]
 
         self.add_subsystem(
             "Preprocess",
@@ -131,6 +156,7 @@ class ALMGroup(om.Group):
                     simTime_id=self.simTime_id,
                     dt=self.dt,
                     turb_i=self.turb_i,
+                    u_local=self.u_local,
                 ),
                 promotes_inputs=[
                     "width",

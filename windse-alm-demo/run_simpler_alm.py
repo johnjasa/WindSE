@@ -168,7 +168,8 @@ problem.cyld_expr_list = [0]
 u_local = Function(problem.fs.V)
 
 # Set the values of the dummy velocity field to be a linear shear in the +x direction
-inflow_profile = Expression(('9.0', '0', '0'), degree=2)
+# inflow_profile = Expression(('9.0', '0', '0'), degree=2)
+inflow_profile = Expression(('cos(x[0])*sin(x[1])', '0', '0'), degree=6)
 u_local.interpolate(inflow_profile)
 
 # Currently, only a single turbine
@@ -218,9 +219,9 @@ for k in range(tSteps):
         simTime_id=simTime_id,
         dt=dt,
         turb_i=turb_i,
+        u_local=u_local,
         ), promotes=['*'])
     prob.setup()
-    prob['u_local'] = [9., 0., 0.]
     prob['yaw'] = yaw
     prob.run_model()
     om_forces = prob['turbine_forces']
@@ -234,9 +235,9 @@ for k in range(tSteps):
         dt=dt,
         turb_i=turb_i,
         num_blades=num_blades,
+        u_local=u_local,
         ), promotes=['*'])
     prob.setup()
-    prob['u_local'] = [9., 0., 0.]
     prob['yaw'] = yaw
     prob.run_model()
     om_forces = prob['turbine_forces']

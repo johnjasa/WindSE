@@ -110,15 +110,16 @@ class FullALM(om.ExplicitComponent):
         self.options.declare('simTime_id', types=int)
         self.options.declare('dt', types=float)
         self.options.declare('turb_i', types=int)
+        self.options.declare('u_local', types=object)
         
     def setup(self):
         self.problem = self.options['problem']
         self.simTime_id = self.options['simTime_id']
         self.dt = self.options['dt']
         self.turb_i = self.options['turb_i']
+        self.u_local = self.options['u_local']
         
         self.add_input('yaw', val=0.)
-        self.add_input('u_local', shape=3)
         self.add_output('turbine_forces', shape=375)
         
     def compute(self, inputs, outputs):
@@ -245,6 +246,33 @@ class FullALM(om.ExplicitComponent):
             blade_unit_vec_temp = np.dot(Rx, blade_unit_vec_base)
             blade_unit_vec = np.dot(Rz, blade_unit_vec_temp)
             
+            time_offset = 1
+            if simTime_id < time_offset:
+                theta_behind = (
+                    theta_0
+                    + 0.5
+                    * (problem.simTime_list[simTime_id] + simTime)
+                    / period
+                    * 2.0
+                    * np.pi
+                )
+            else:
+                theta_behind = (
+                    theta_0
+                    + 0.5
+                    * (problem.simTime_list[simTime_id - time_offset] + simTime)
+                    / period
+                    * 2.0
+                    * np.pi
+                )
+    
+            Rx_alt = rot_x(theta_behind)
+            temp = np.dot(Rx_alt, blade_pos_base)
+            blade_pos_alt = np.dot(Rz, temp)
+            blade_pos_alt[0, :] += problem.farm.x[turb_i]
+            blade_pos_alt[1, :] += problem.farm.y[turb_i]
+            blade_pos_alt[2, :] += problem.farm.z[turb_i]
+            
             # Initialize space to hold the fluid velocity at each actuator node
             u_fluid = np.zeros((3, problem.num_blade_segments))
 
@@ -252,7 +280,9 @@ class FullALM(om.ExplicitComponent):
             for k in range(problem.num_blade_segments):
                 
                 # Hardcoding a uniform flow field for now
-                u_fluid[:, k] = inputs['u_local']
+                u_fluid[:, k] = self.u_local(
+                    blade_pos_alt[0, k], blade_pos_alt[1, k], blade_pos_alt[2, k]
+                )
 
                 u_fluid[:, k] -= (
                     np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
