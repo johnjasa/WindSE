@@ -169,7 +169,7 @@ u_local = Function(problem.fs.V)
 
 # Set the values of the dummy velocity field to be a linear shear in the +x direction
 # inflow_profile = Expression(('9.0', '0', '0'), degree=2)
-inflow_profile = Expression(('cos(x[0])*sin(x[1])', '0', '0'), degree=6)
+inflow_profile = Expression(('cos(x[0])*sin(x[1])', 'cos(x[1])*2.2', 'sin(x[0])'), degree=6)
 u_local.interpolate(inflow_profile)
 
 # Currently, only a single turbine
