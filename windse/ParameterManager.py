@@ -145,16 +145,19 @@ class Parameters(dict):
         if yaml_bc.get("boundary_types",{}):
             self.default_bc_types = False
 
-        if yaml_file.get("optimization",{}):
-            if not yaml_file["general"].get("dolfin_adjoint"):
-                print("Warning: Optimization options given, but general:dolfin_ajdoint is set to False")
-
         ### Set the parameters ###
         self.update(self.NestedUpdate(yaml_file))
 
         ### Create Instances of the general options ###
         for key, value in self["general"].items():
             setattr(self,key,value)
+
+        ### Check if dolfin_adjoint is unnecessary or required ###
+        optimizing = yaml_file.get("optimization",{}).get("control_types",None) is not None
+        if optimizing and not self.dolfin_adjoint:
+            raise ValueError("Optimization setting provided but general:dolfin_adjoint is set to False")
+        elif not optimizing and self.dolfin_adjoint: 
+            raise ValueError("general:dolfin_adjoint is set to True but no optimization parameters provided")
 
         # print(self.dolfin_adjoint)
         # for module in sys.modules:
@@ -319,6 +322,10 @@ class Parameters(dict):
                 self.fprint("",tab=tab+1)
 
     def tag_output(self, key, value):
+
+        ### Process value ###
+        if not isinstance(value,int):
+            value = float(value)
 
         ### Grab the name of the module that called this function ###
         stack = inspect.stack()[1][0]

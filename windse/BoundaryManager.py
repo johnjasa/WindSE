@@ -38,10 +38,17 @@ class GenericBoundary(object):
         self.height_first_save = True
         self.fprint = self.params.fprint
         self.tag_output = self.params.tag_output
+        self.debug_mode = self.params.debug_mode
         
         ### Update attributes based on params file ###
         for key, value in self.params["boundary_conditions"].items():
             setattr(self,key,value)
+
+        ### get the height to apply the HH_vel ###
+        if self.vel_height == "HH":
+            self.vel_height = np.mean(farm.HH)
+        if np.isnan(self.vel_height):
+            raise ValueError("Hub Height not defined, likely and EmptyFarm. Please set boundary_conditions:vel_height in config yaml")
 
         ### Get solver parameters ###
         self.final_time = self.params["solver"]["final_time"]
@@ -55,6 +62,36 @@ class GenericBoundary(object):
             self.boundary_names = self.dom.boundary_names
         if self.params.default_bc_types:
             self.boundary_types = self.dom.boundary_types
+
+    def DebugOutput(self):
+        if self.debug_mode:
+            # Average of the x and y-velocities
+            self.tag_output("min_x", np.min(self.ux.vector()[:]))
+            self.tag_output("max_x", np.max(self.ux.vector()[:]))
+            self.tag_output("avg_x", np.mean(self.ux.vector()[:]))
+            self.tag_output("min_y", np.min(self.uy.vector()[:]))
+            self.tag_output("max_y", np.max(self.uy.vector()[:]))
+            self.tag_output("avg_y", np.mean(self.uy.vector()[:]))
+
+            # If applicable, average of z-velocities
+            if self.dom.dim == 3:
+                self.tag_output("min_z", np.min(self.uz.vector()[:]))
+                self.tag_output("max_z", np.max(self.uz.vector()[:]))
+                self.tag_output("avg_z", np.mean(self.uz.vector()[:]))
+
+            # Average of the pressures
+            self.tag_output("min_p", np.min(self.bc_pressure.vector()[:]))
+            self.tag_output("max_p", np.max(self.bc_pressure.vector()[:]))
+            self.tag_output("avg_p", np.mean(self.bc_pressure.vector()[:]))
+
+            # Average of all initialized fields (confirms function assignment) ### Depends on DOFS
+            self.tag_output("min_initial_values", np.min(self.u0.vector()[:]))
+            self.tag_output("max_initial_values", np.max(self.u0.vector()[:]))
+            self.tag_output("avg_initial_values", np.mean(self.u0.vector()[:]))
+
+            # Get number of boundary conditions 
+            num_bc = len(self.bcu) + len(self.bcp) + len(self.bcs)
+            self.tag_output("num_bc",num_bc)
 
     def SetupBoundaries(self):
         ### Create the equations need for defining the boundary conditions ###
@@ -280,6 +317,7 @@ class UniformInflow(GenericBoundary):
 
         ### Setup the boundary Conditions ###
         self.SetupBoundaries()
+        self.DebugOutput()
         self.fprint("Boundary Condition Finished",special="footer")
 
 class PowerInflow(GenericBoundary):
@@ -334,8 +372,8 @@ class PowerInflow(GenericBoundary):
         #################
         #################
         #################
-        scaled_depth = np.abs(np.divide(depth_v0.vector()[:],(np.mean(farm.HH)-dom.ground_reference)))
-        # scaled_depth = np.abs(np.divide(depth_v0.vector()[:],(np.mean(farm.HH)-0.0)))
+        scaled_depth = np.abs(np.divide(depth_v0.vector()[:],(np.mean(self.vel_height)-dom.ground_reference)))
+        # scaled_depth = np.abs(np.divide(depth_v0.vector()[:],(np.mean(self.vel_height)-0.0)))
         #################
         #################
         #################
@@ -367,6 +405,7 @@ class PowerInflow(GenericBoundary):
 
         ### Setup the boundary Conditions ###
         self.SetupBoundaries()
+        self.DebugOutput()
         self.fprint("Boundary Condition Setup",special="footer")
 
 class LogLayerInflow(GenericBoundary):
@@ -400,12 +439,12 @@ class LogLayerInflow(GenericBoundary):
         self.uz = Function(fs.V2)
         if dom.ground_reference == 0:
             scaled_depth = np.abs(np.divide(depth_v0.vector()[:]+0.0001,0.0001))
-            ustar = self.k/np.log(np.mean(farm.HH)/0.0001)
+            ustar = self.k/np.log(np.mean(self.vel_height)/0.0001)
         elif dom.ground_reference <= 0:
             raise ValueError("Log profile cannot be used with negative z values")
         else:
             scaled_depth = np.abs(np.divide(depth_v0.vector()[:]+dom.ground_reference,(dom.ground_reference)))
-            ustar = self.k/np.log(np.mean(farm.HH)/dom.ground_reference)
+            ustar = self.k/np.log(np.mean(self.vel_height)/dom.ground_reference)
         self.unit_reference_velocity = np.multiply(ustar/self.k,np.log(scaled_depth))
         ux_com, uy_com, uz_com = self.PrepareVelocity(self.dom.inflow_angle)
 
@@ -430,6 +469,7 @@ class LogLayerInflow(GenericBoundary):
 
         ### Setup the boundary Conditions ###
         self.SetupBoundaries()
+        self.DebugOutput()
         self.fprint("Boundary Condition Setup",special="footer")
 
 class TurbSimInflow(LogLayerInflow):
@@ -472,6 +512,7 @@ class TurbSimInflow(LogLayerInflow):
                 self.boundaryIDs.append(k)
 
         self.UpdateVelocity(0.0)
+        self.DebugOutput()
 
     def UpdateVelocity(self, simTime):
 
@@ -499,6 +540,7 @@ class TurbSimInflow(LogLayerInflow):
             self.fs.VelocityAssigner.assign(self.bc_velocity,[self.ux,self.uy])
 
         self.SetupBoundaries()
+
 
 
 

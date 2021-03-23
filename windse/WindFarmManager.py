@@ -50,6 +50,25 @@ class GenericWindFarm(object):
         self.rd_first_save = True
         self.fprint = self.params.fprint
         self.tag_output = self.params.tag_output
+        self.debug_mode = self.params.debug_mode
+
+        ### Init empty design variables ###
+        self.cl = None;    self.mcl = None
+        self.cd = None;    self.mcd = None
+        self.chord = None; self.mchord = None
+        self.x = None;     self.mx = None
+        self.y = None;     self.my = None
+        self.yaw = None;   self.myaw = None
+        self.axial = None; self.maxial = None
+        
+        ### Init empty design variables ###
+        self.cl = None;    self.mcl = None
+        self.cd = None;    self.mcd = None
+        self.chord = None; self.mchord = None
+        self.x = None;     self.mx = None
+        self.y = None;     self.my = None
+        self.yaw = None;   self.myaw = None
+        self.axial = None; self.maxial = None
 
         ### Update attributes based on params file ###
         for key, value in self.params["wind_farm"].items():
@@ -60,12 +79,28 @@ class GenericWindFarm(object):
 
         self.extra_kwarg = {}
         self.optimize = False
+
         if self.params.dolfin_adjoint:
             self.layout_bounds = self.params["optimization"]["layout_bounds"]
             self.control_types = self.params["optimization"]["control_types"]
             self.extra_kwarg["annotate"] = False
             self.optimize = True
 
+    def DebugOutput(self):
+        if self.debug_mode:
+            self.tag_output("min_x", np.min(self.x))
+            self.tag_output("max_x", np.max(self.x))
+            self.tag_output("avg_x", np.mean(self.x))
+            self.tag_output("min_y", np.min(self.y))
+            self.tag_output("max_y", np.max(self.y))
+            self.tag_output("avg_y", np.mean(self.y))
+            self.tag_output("min_z", np.min(self.z))
+            self.tag_output("max_z", np.max(self.z))
+            self.tag_output("avg_z", np.mean(self.z))
+            self.tag_output("min_yaw", np.min(self.yaw))
+            self.tag_output("max_yaw", np.max(self.yaw))
+            self.tag_output("avg_yaw", np.mean(self.yaw))
+            # x, y, z, yaw, chord, 
 
     def PlotFarm(self,show=False,filename="wind_farm",power=None):
         """
@@ -75,6 +110,9 @@ class GenericWindFarm(object):
         :Keyword Arguments:
             * **show** (*bool*): Default: True, Set False to suppress output but still save.
         """
+        if self.numturbs == 0:
+            return
+
         ### Create the path names ###
         folder_string = self.params.folder+"/plots/"
         file_string = self.params.folder+"/plots/"+filename+".pdf"
@@ -322,10 +360,11 @@ class GenericWindFarm(object):
             self.ground[i] = self.z[i] - self.HH[i]       
 
             # Update blade level controls
-            for k in range(self.num_blade_segments):
-                self.mcl[i][k] = Constant(self.cl[i][k])
-                self.mcd[i][k] = Constant(self.cd[i][k])
-                self.mchord[i][k] = Constant(self.chord[i][k])
+            if self.turbine_method == "alm" or self.force == "chord": 
+                for k in range(self.num_blade_segments):
+                    self.mcl[i][k] = Constant(self.cl[i][k])
+                    self.mcd[i][k] = Constant(self.cd[i][k])
+                    self.mchord[i][k] = Constant(self.chord[i][k])
 
 
 
@@ -358,6 +397,9 @@ class GenericWindFarm(object):
 
 
     def SimpleRefine(self,radius,expand_factor=1):
+        if self.numturbs == 0:
+            return
+
         self.fprint("Cylinder Refinement Near Turbines",special="header")
         refine_start = time.time()
 
@@ -421,6 +463,9 @@ class GenericWindFarm(object):
 
 
     def WakeRefine(self,radius,length,theta=0.0,expand_factor=1,centered=False):
+        if self.numturbs == 0:
+            return
+
         self.fprint("Wake Refinement Near Turbines",special="header")
         refine_start = time.time()
 
@@ -502,6 +547,9 @@ class GenericWindFarm(object):
         self.fprint("Mesh Refinement Finished: {:1.2f} s".format(refine_stop-refine_start),special="footer")
 
     def TearRefine(self,radius,theta=0.0,expand_factor=1):
+        if self.numturbs == 0:
+            return
+
         self.fprint("Tear Drop Refinement Near Turbines",special="header")
         refine_start = time.time()
 
@@ -597,6 +645,9 @@ class GenericWindFarm(object):
         self.fprint("Mesh Refinement Finished: {:1.2f} s".format(refine_stop-refine_start),special="footer")
 
     def SphereRefine(self,radius,expand_factor=1):
+        if self.numturbs == 0:
+            return
+
         self.fprint("Sphere Refinement Near Turbines",special="header")
         refine_start = time.time()
 
@@ -793,8 +844,8 @@ class GenericWindFarm(object):
         x = fs.tf_V0.tabulate_dof_coordinates().T
         [tf1, tf2, tf3], sparse_ids, actuator_array = CalculateDiskTurbineForces(x, self, fs, save_actuators=True)
 
-        self.fprint("Turbine Force Space:  {}".format(fs.tf_space))
-        self.fprint("Turbine Force Degree: {:d}".format(fs.tf_degree))
+        self.fprint("Turbine Force Space:  {}".format(fs.turbine_space))
+        self.fprint("Turbine Force Degree: {:d}".format(fs.turbine_degree))
         self.fprint("Quadrature DOFS:      {:d}".format(fs.tf_V.dim()))
         self.fprint("Turbine DOFs:         {:d}".format(len(sparse_ids)))
         self.fprint("Compression:          {:1.4f} %".format(len(sparse_ids)/fs.tf_V.dim()*100))
@@ -809,7 +860,7 @@ class GenericWindFarm(object):
         self.actuator_disks = Function(fs.tf_V)
         self.actuator_disks.vector()[:] = np.sum(actuator_array,axis=1)
         self.fprint("Projecting Turbine Force")
-        self.actuator_disks = project(self.actuator_disks,fs.V,solver_type='mumps',form_compiler_parameters={'quadrature_degree': fs.tf_degree},**self.extra_kwarg)
+        self.actuator_disks = project(self.actuator_disks,fs.V,solver_type='mumps',form_compiler_parameters={'quadrature_degree': fs.turbine_degree},**self.extra_kwarg)
         
         self.actuator_disks_list = []
         for i in range(self.numturbs):
@@ -850,8 +901,8 @@ class GenericWindFarm(object):
         self.fprint("Using a Dolfin Representation")
 
         ### this section of code is a hack to get "chord"-type disk representation ###
-        if not hasattr(self, "mchord"):
-            if not hasattr(self, "chord"):
+        if self.mchord is not None:
+            if self.chord is not None:
                 if self.blade_segments == "computed":
                     self.num_blade_segments = 10 ##### FIX THIS ####
                     self.blade_segments = self.num_blade_segments
@@ -908,7 +959,6 @@ class GenericWindFarm(object):
             W = self.thickness[i]*1.0
             R = self.RD[i]/2.0
             ma = self.ma[i]
-            chord = self.mchord[i]
             C_tprime = 4*ma/(1-ma)
 
             ### Set up some dim dependent values ###
@@ -939,6 +989,7 @@ class GenericWindFarm(object):
             elif self.force == "sine":
                 force = (r*sin(pi*r)+0.5)/S_norm
             elif self.force == "chord":
+                chord = self.mchord[i]
                 force = RadialChordForce(r,chord)
             F = 0.5*A*C_tprime*force
 
@@ -1087,6 +1138,7 @@ class GridWindFarm(GenericWindFarm):
         self.ex_z = [min(self.ground),max(self.z+self.RD)]
         self.params["wind_farm"]["ex_z"] = self.ex_z
 
+        self.DebugOutput()
         self.fprint("Wind Farm Generated",special="footer")
 
 
@@ -1160,7 +1212,7 @@ class RandomWindFarm(GenericWindFarm):
         self.ex_z = [min(self.ground),max(self.z+self.RD)]
         self.params["wind_farm"]["ex_z"] = self.ex_z
 
-
+        self.DebugOutput()
         self.fprint("Wind Farm Generated",special="footer")
 
 
@@ -1235,5 +1287,24 @@ class ImportedWindFarm(GenericWindFarm):
         ### Calculate the extent of the farm ###
         self.CalculateFarmBoundingBox()
     
-
+        self.DebugOutput()
         self.fprint("Wind Farm Imported",special="footer")
+
+
+class EmptyWindFarm(GenericWindFarm):
+
+    def __init__(self,dom):
+        super(EmptyWindFarm, self).__init__(dom)
+        self.numturbs  = 0
+        self.x         = []
+        self.y         = []
+        self.z         = []
+        self.HH        = []
+        self.yaw       = []
+        self.RD        = []
+        self.radius    = []
+        self.thickness = []
+        self.axial     = []
+        self.ex_x      = [0,0]
+        self.ex_y      = [0,0]
+        self.ex_z      = [0,0]

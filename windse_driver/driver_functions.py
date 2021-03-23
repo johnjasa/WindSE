@@ -97,7 +97,8 @@ def BuildDomain(params):
     #### Build Farm
     farm_dict = {"grid":windse.GridWindFarm,
                  "random":windse.RandomWindFarm,
-                 "imported":windse.ImportedWindFarm}
+                 "imported":windse.ImportedWindFarm,
+                 "empty":windse.EmptyWindFarm}
     farm = farm_dict[params["wind_farm"]["type"]](dom)
 
     if dom.type != "imported":
@@ -196,7 +197,7 @@ def SetupSimulation(params_loc=None):
     solver = BuildSolver(params,problem)
 
     farm.PlotFarm(params["wind_farm"]["display"])
-    if hasattr(farm,"chord"):
+    if farm.chord is not None:
         farm.PlotChord(params["wind_farm"]["display"])
 
 
