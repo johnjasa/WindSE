@@ -361,7 +361,7 @@ def CalculateDiskTurbineForces(x,wind_farm,fs,dfd=None,save_actuators=False,spar
 #================================================================
 
 def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False, use_OM=False):
-
+    
     simTime = problem.simTime_list[simTime_id]
 
 
@@ -582,7 +582,26 @@ def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, 
 
     # Blade length (turbine radius)
     L = problem.farm.radius[turb_i]
-
+    
+    
+    if use_OM:
+        import openmdao.api as om
+        prob = om.Problem()
+        prob.model.add_subsystem('ALMGroup', ALMGroup(problem=problem,
+            simTime_id=simTime_id,
+            dt=dt,
+            turb_i=turb_i,
+            num_blades=num_blades,
+            u_local=u_local,
+            ), promotes=['*'])
+        prob.setup()
+        prob['yaw'] = yaw
+        prob.run_model()
+        
+        if dfd == None:
+            tf.vector()[:] = prob['turbine_forces'].flatten()
+            return tf
+            
     #================================================================
     # Set Derived Constants
     #================================================================
