@@ -425,11 +425,13 @@ class ComputeURel(om.ExplicitComponent):
         arange = np.arange(3*self.problem.num_blade_segments)
         self.declare_partials('u_rel', 'blade_vel', rows=arange, cols=arange, val=1.)
         
-        # TODO : compute derivs for u_local
-        # rows = np.arange(3*self.problem.num_blade_segments)
-        # cols = np.repeat([0, 1, 2], self.problem.num_blade_segments)
-        # self.declare_partials('u_rel', 'u_local', rows=rows, cols=cols, val=1.)
-        self.declare_partials('u_rel', 'blade_unit_vec', method='cs')
+        # TODO : compute derivs for u_local if needed
+        rows = np.arange(3*self.problem.num_blade_segments)
+        cols = np.repeat([0, 1, 2], self.problem.num_blade_segments)
+        self.declare_partials('u_rel', 'u_local', rows=rows, cols=cols)
+        self.declare_partials('u_rel', 'blade_unit_vec')
+        self.declare_coloring(wrt=['blade_unit_vec', 'u_local'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+                      orders=40, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
         problem = self.problem
@@ -504,7 +506,7 @@ class ComputeCLCD(om.ExplicitComponent):
         
         self.declare_partials('*', '*')
         
-        self.declare_coloring(wrt='*', method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+        self.declare_coloring(wrt='*', method='fd', perturb_size=1e-6, num_full_jacs=2, tol=1e-20,
                       orders=20, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
