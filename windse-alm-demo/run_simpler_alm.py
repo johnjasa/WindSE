@@ -8,7 +8,7 @@ from alm_class import UpdateActuatorLineForce
 from simpler_alm_class import SimplerUpdateActuatorLineForce
 import openmdao.api as om
 from full_alm_openmdao import FullALM
-from alm_group import ALMGroup
+from windse.ALM_OM import ALMGroup
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes

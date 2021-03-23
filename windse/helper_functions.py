@@ -360,7 +360,7 @@ def CalculateDiskTurbineForces(x,wind_farm,fs,dfd=None,save_actuators=False,spar
 
 #================================================================
 
-def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False):
+def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, verbose=False, use_OM=False):
 
     simTime = problem.simTime_list[simTime_id]
 
