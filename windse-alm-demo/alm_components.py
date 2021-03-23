@@ -443,7 +443,7 @@ class ComputeURel(om.ExplicitComponent):
         for k in range(problem.num_blade_segments):
         
             u_fluid[:, k] = inputs['u_local'][:, k] - (
-                np.dot(u_fluid[:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
+                np.dot(inputs['u_local'][:, k], blade_unit_vec[:, 1]) * blade_unit_vec[:, 1]
             )
             
         # Form the total relative velocity vector (including velocity from rotating blade)
