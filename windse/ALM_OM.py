@@ -395,14 +395,20 @@ class ComputeULocal(om.ExplicitComponent):
         self.u_local = self.options['u_local']
         
         self.add_input('blade_pos_alt', shape=(3, self.problem.num_blade_segments))
+        # This means that after setup, the flow field of the problem cannot change.
+        # This may be a problem depending on how we choose to integrate the OM model.
+        self.add_input('u_local_flow_field', val=self.u_local.vector().get_local())
         self.add_output('u_local', shape=(3, self.problem.num_blade_segments))
         
         # TODO: Might be CS safe; give it a shot
-        self.declare_coloring(wrt=['blade_pos_alt'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
+        self.declare_coloring(wrt=['blade_pos_alt', 'u_local_flow_field'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
               orders=20, show_summary=False, show_sparsity=False)
         
     def compute(self, inputs, outputs):
         blade_pos_alt = inputs['blade_pos_alt']
+        
+        self.u_local.vector().set_local(inputs['u_local_flow_field'])
+        
         for k in range(self.problem.num_blade_segments):
             outputs['u_local'][:, k] = self.u_local(blade_pos_alt[0, k],
                  blade_pos_alt[1, k],
@@ -927,7 +933,7 @@ class ALMGroup(om.Group):
                     "rdim",
                     "blade_pos_base",
                     "blade_vel_base",
-                    "u_local",
+                    "u_local_flow_field",
                     "yaw",
                 ],
             )

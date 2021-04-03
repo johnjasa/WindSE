@@ -4,11 +4,8 @@ import matplotlib.pyplot as plt
 import scipy.interpolate as interp
 import glob
 
-from alm_class import UpdateActuatorLineForce
-from simpler_alm_class import SimplerUpdateActuatorLineForce
 import openmdao.api as om
-from full_alm_openmdao import FullALM
-from alm_group import ALMGroup
+from windse.ALM_OM import ALMGroup
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
@@ -219,11 +216,12 @@ for k in range(tSteps):
     prob.run_model()
     om_forces = prob['turbine_forces']
     
-    # totals = prob.compute_totals('turbine_forces', 'yaw')
-    # print(totals)
+    totals = prob.compute_totals('turbine_forces', 'u_local_flow_field')
+    totals = totals[('turbine_forces', 'u_local_flow_field')]
+    print(np.linalg.norm(totals))
     
-    check_partials_data = prob.check_partials(compact_print=True)
+    # check_partials_data = prob.check_partials(compact_print=True)
     # 
-    # om.partial_deriv_plot('lift_force', 'u_unit_vec', check_partials_data, binary=False)
+    # om.partial_deriv_plot('u_local', 'u_local_flow_field', check_partials_data, binary=False)
     # om.partial_deriv_plot('lift_force', 'blade_unit_vec', check_partials_data, binary=False)
     
