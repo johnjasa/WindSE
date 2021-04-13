@@ -5,7 +5,7 @@ import scipy.interpolate as interp
 import glob
 
 import openmdao.api as om
-from windse.ALM_OM import ALMGroup
+from windse.ALM_OM import ALMGroup, compute_u_local_array
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
@@ -209,19 +209,20 @@ for k in range(tSteps):
         dt=dt,
         turb_i=turb_i,
         num_blades=num_blades,
-        u_local=u_local,
         ), promotes=['*'])
     prob.setup()
     prob['yaw'] = yaw
+    prob = compute_u_local_array(problem, num_blades, simTime, simTime_id, turb_i, yaw, u_local, prob)
     prob.run_model()
     om_forces = prob['turbine_forces']
     
-    totals = prob.compute_totals('turbine_forces', 'u_local_flow_field')
-    totals = totals[('turbine_forces', 'u_local_flow_field')]
+    totals = prob.compute_totals('turbine_forces', 'ALMBlade_0.u_local')
+    totals = totals[('turbine_forces', 'ALMBlade_0.u_local')]
+    print(totals)
     print(np.linalg.norm(totals))
     
     # check_partials_data = prob.check_partials(compact_print=True)
     # 
-    # om.partial_deriv_plot('u_local', 'u_local_flow_field', check_partials_data, binary=False)
+    # om.partial_deriv_plot('u_local', 'u_local', check_partials_data, binary=False)
     # om.partial_deriv_plot('lift_force', 'blade_unit_vec', check_partials_data, binary=False)
     

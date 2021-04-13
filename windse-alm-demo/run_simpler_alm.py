@@ -8,7 +8,7 @@ from alm_class import UpdateActuatorLineForce
 from simpler_alm_class import SimplerUpdateActuatorLineForce
 import openmdao.api as om
 from full_alm_openmdao import FullALM
-from windse.ALM_OM import ALMGroup
+from windse.ALM_OM import ALMGroup, compute_u_local_array
 
 # Create a 3D box mesh from (-100, -100, 0) to (100, 100, 200)
 # with RES x RES x RES total nodes
@@ -235,10 +235,12 @@ for k in range(tSteps):
         dt=dt,
         turb_i=turb_i,
         num_blades=num_blades,
-        u_local=u_local,
         ), promotes=['*'])
     prob.setup()
     prob['yaw'] = yaw
+    
+    prob = compute_u_local_array(problem, num_blades, simTime, simTime_id, turb_i, yaw, u_local, prob)
+    
     prob.run_model()
     om_forces = prob['turbine_forces']
     

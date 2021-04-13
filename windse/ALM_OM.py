@@ -7,6 +7,7 @@ import openmdao.api as om
 num_blades = 3
 
 def rot_x(theta):
+    theta = float(theta)
     Rx = np.array(
         [
             [1, 0, 0],
@@ -27,6 +28,73 @@ def rot_z(theta):
     )
 
     return Rz
+    
+    
+def compute_u_local_array(problem, num_blades, simTime, simTime_id, turb_i, yaw, u_local, prob):
+    # Compute blade pos alt
+    period = 60.0 / problem.rpm
+    theta_vec = np.linspace(0.0, 2.0 * np.pi, num_blades, endpoint=False)
+    Rz = rot_z(yaw)
+    
+    for i_blade, theta in enumerate(theta_vec):
+        time_offset = 1
+        if simTime_id < time_offset:
+            theta_behind = (
+                theta
+                + 0.5
+                * (problem.simTime_list[simTime_id] + simTime)
+                / period
+                * 2.0
+                * np.pi
+            )
+        else:
+            theta_behind = (
+                theta
+                + 0.5
+                * (problem.simTime_list[simTime_id - time_offset] + simTime)
+                / period
+                * 2.0
+                * np.pi
+            )
+           
+        # Blade length (turbine radius)
+        blade_length = problem.farm.radius[turb_i]
+
+        # ================================================================
+        # Set Derived Constants
+        # ================================================================
+
+        # Calculate the radial position of each actuator node
+        rdim = np.linspace(0.0, blade_length, problem.num_blade_segments)
+
+        # Calculate an array describing the x, y, z position of each actuator node
+        # Note: The basic blade is oriented along the +y-axis
+        blade_pos_base = np.vstack(
+            (
+                np.zeros(problem.num_blade_segments),
+                rdim,
+                np.zeros(problem.num_blade_segments),
+            )
+        )
+
+        Rx_alt = rot_x(theta_behind)
+        temp = np.dot(Rx_alt, blade_pos_base)
+        blade_pos_alt = np.dot(Rz, temp)
+        blade_pos_alt[0, :] += problem.farm.x[turb_i]
+        blade_pos_alt[1, :] += problem.farm.y[turb_i]
+        blade_pos_alt[2, :] += problem.farm.z[turb_i]
+        
+        u_local_array = np.zeros((3, problem.num_blade_segments))
+        
+        for k in range(problem.num_blade_segments):
+            u_local_array[:, k] = u_local(blade_pos_alt[0, k],
+                 blade_pos_alt[1, k],
+                 blade_pos_alt[2, k])
+                 
+        prob[f"ALMBlade_{i_blade}.u_local"] = u_local_array
+        
+    return prob
+        
 
 def build_lift_and_drag(problem, rdim):
     if not hasattr(problem, "interp_lift"):
@@ -243,6 +311,7 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         theta_offset = (simTime + 0.5 * dt) / period * 2.0 * np.pi
         
         theta = inputs['theta'] + theta_offset
+        theta = float(theta)
         
         dRx = np.array(
             [
@@ -253,7 +322,7 @@ class ComputeRotationMatrices(om.ExplicitComponent):
         )
         partials['Rx', 'theta'] = dRx
         
-        yaw = inputs['yaw']
+        yaw = float(inputs['yaw'])
         dRz = np.array(
             [
                 [-np.sin(yaw), -np.cos(yaw), 0],
@@ -382,39 +451,6 @@ class ComputeBladePosAlt(om.ExplicitComponent):
         outputs['blade_pos_alt'] = blade_pos_alt
         
         
-class ComputeULocal(om.ExplicitComponent):
-    
-    def initialize(self):
-        self.options.declare('u_local', types=object)
-        self.options.declare('problem', types=object)
-        
-    def setup(self):
-        self.problem = self.options['problem']
-        ndim = self.problem.dom.dim
-        n_points = self.problem.coords.shape[0]
-        self.u_local = self.options['u_local']
-        
-        self.add_input('blade_pos_alt', shape=(3, self.problem.num_blade_segments))
-        # This means that after setup, the flow field of the problem cannot change.
-        # This may be a problem depending on how we choose to integrate the OM model.
-        self.add_input('u_local_flow_field', val=self.u_local.vector().get_local())
-        self.add_output('u_local', shape=(3, self.problem.num_blade_segments))
-        
-        # TODO: Might be CS safe; give it a shot
-        self.declare_coloring(wrt=['blade_pos_alt', 'u_local_flow_field'], method='fd', perturb_size=1e-5, num_full_jacs=2, tol=1e-20,
-              orders=20, show_summary=False, show_sparsity=False)
-        
-    def compute(self, inputs, outputs):
-        blade_pos_alt = inputs['blade_pos_alt']
-        
-        self.u_local.vector().set_local(inputs['u_local_flow_field'])
-        
-        for k in range(self.problem.num_blade_segments):
-            outputs['u_local'][:, k] = self.u_local(blade_pos_alt[0, k],
-                 blade_pos_alt[1, k],
-                 blade_pos_alt[2, k])
-
-
 class ComputeURel(om.ExplicitComponent):
 
     def initialize(self):
@@ -794,15 +830,16 @@ class ALMBlade(om.Group):
         self.options.declare("simTime_id", types=int)
         self.options.declare("dt", types=float)
         self.options.declare("turb_i", types=int)
-        self.options.declare("u_local", types=object)
 
     def setup(self):
         self.problem = self.options["problem"]
         self.simTime_id = self.options["simTime_id"]
         self.dt = self.options["dt"]
         self.turb_i = self.options["turb_i"]
-        self.u_local = self.options["u_local"]
-
+        
+        ivc = self.add_subsystem('IVC', om.IndepVarComp(), promotes=['*'])
+        ivc.add_output('u_local', shape=(3, self.problem.num_blade_segments))
+        
         self.add_subsystem(
             "ComputeRotationMatrices",
             ComputeRotationMatrices(
@@ -831,15 +868,6 @@ class ALMBlade(om.Group):
             promotes=["*"],
         )
         
-        self.add_subsystem(
-            "ComputeULocal",
-            ComputeULocal(
-                problem=self.problem,
-                u_local=self.u_local,
-            ),
-            promotes=["*"],
-        )
-
         self.add_subsystem(
             "ComputeURel",
             ComputeURel(
@@ -899,14 +927,12 @@ class ALMGroup(om.Group):
         self.options.declare("dt", types=float)
         self.options.declare("turb_i", types=int)
         self.options.declare("num_blades", types=int)
-        self.options.declare("u_local", types=object)
 
     def setup(self):
         self.problem = self.options["problem"]
         self.simTime_id = self.options["simTime_id"]
         self.dt = self.options["dt"]
         self.turb_i = self.options["turb_i"]
-        self.u_local = self.options["u_local"]
 
         self.add_subsystem(
             "Preprocess",
@@ -926,14 +952,12 @@ class ALMGroup(om.Group):
                     simTime_id=self.simTime_id,
                     dt=self.dt,
                     turb_i=self.turb_i,
-                    u_local=self.u_local,
                 ),
                 promotes_inputs=[
                     "width",
                     "rdim",
                     "blade_pos_base",
                     "blade_vel_base",
-                    "u_local_flow_field",
                     "yaw",
                 ],
             )
