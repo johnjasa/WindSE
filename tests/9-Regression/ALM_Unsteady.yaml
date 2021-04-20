@@ -1,7 +1,7 @@
 general:
     # name: "iea_rwt"
     output: ["mesh","initial_guess","height","turbine_force","solution"]
-    dolfin_adjoint: True
+    dolfin_adjoint: False
     debug_mode: True
 
 wind_farm:
@@ -37,8 +37,8 @@ function_space:
     type: linear                 # Use linear finite elements for both pressure and velocity
 
 boundary_conditions:
-    vel_profile: turbsim
-    turbsim_path: Input_Data/turbsim/
+    vel_profile: log
+    # turbsim_path: Input_Data/turbsim/
     HH_vel: 9.0                  # The velocity at the turbine hub height | m
     k: 0.4                       # The von Karman constant
     boundary_types:
@@ -53,14 +53,14 @@ problem:
 
 solver:
     type: unsteady               # The unsteady solver is required for ALM simulations
-    save_interval: 5.0           # Save the velocity and pressure files at intervals of "save_interval" | s
+    save_interval: 1.0           # Save the velocity and pressure files at intervals of "save_interval" | s
     final_time: 10.0             # The total duration of the simulation | s
     save_power: true
     power_type: alm_power
 
-optimization:
-    control_types: [chord]
-    objective_type: alm_power
-    record_time: 0.0
-    # optimize: False
-    gradient: True
+# optimization:
+#     control_types: [chord]
+#     objective_type: alm_power
+#     record_time: 0.0
+#     # optimize: False
+#     gradient: True

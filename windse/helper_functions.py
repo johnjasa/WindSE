@@ -588,7 +588,6 @@ def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, dfd=None, 
             dt=dt,
             turb_i=turb_i,
             num_blades=num_blades,
-            u_local=u_local,
             ), promotes=['*'])
         prob.setup()
         # prob['yaw'] = yaw
