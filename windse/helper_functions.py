@@ -359,7 +359,7 @@ def CalculateDiskTurbineForces(x,wind_farm,fs,dfd=None,save_actuators=False,spar
 
 #================================================================
 
-def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_i, dfd=None, verbose=False):
+def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_i, dfd=None, verbose=False, use_OM=True):
 
     simTime = problem.simTime_list[simTime_id]
 
@@ -612,7 +612,7 @@ def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_
     elif dfd == 'chord':
         c = np.ones(problem.num_blade_segments)
         dfd_chord = np.zeros((np.size(problem.coords), problem.num_blade_segments))
-
+        
 
     # Calculate the blade position based on current simTime and turbine RPM
     period = 60.0/problem.rpm
@@ -624,6 +624,32 @@ def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_
     mpi_u_fluid_buff = np.zeros(mpi_u_fluid_constant.value_size())
     mpi_u_fluid_constant.eval(mpi_u_fluid_buff, mpi_u_fluid_buff)
     mpi_u_fluid = mpi_u_fluid_buff.reshape(problem.farm.numturbs, -1)
+    
+    if use_OM:
+        import openmdao.api as om
+        from windse.ALM_OM import ALMGroup
+        
+        prob = om.Problem()
+        prob.model.add_subsystem('ALMGroup', ALMGroup(problem=problem,
+            simTime_id=simTime_id,
+            dt=dt,
+            turb_i=turb_i,
+            num_blades=num_blades,
+            ), promotes=['*'])
+        prob.setup()
+        # prob['yaw'] = yaw
+        i = 0
+        mpi_u_fluid = np.squeeze(mpi_u_fluid)
+        for i_blade in range(num_blades):
+            u_slice = mpi_u_fluid[i:i+3*problem.num_blade_segments]
+            u_local = u_slice.reshape(3, problem.num_blade_segments, order='F')
+            prob[f"ALMBlade_{i_blade}.u_local"] = u_local
+            i += 3*problem.num_blade_segments
+        prob.run_model()
+        
+        if dfd == None:
+            tf.vector()[:] = prob['turbine_forces'].flatten()
+            return tf
 
 
     # Treat each blade separately
@@ -844,7 +870,7 @@ def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_
 
 #================================================================
 
-def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, mpi_u_fluid, dfd=None, verbose=False, use_OM=True):
+def UpdateActuatorLineForce_deprecated(problem, mpi_u_fluid_constant, simTime_id, dt, turb_i, dfd=None, verbose=False):
     
     print('in the line force', simTime_id, dt, turb_i, dfd, use_OM)
     
@@ -1133,25 +1159,6 @@ def UpdateActuatorLineForce(problem, u_local, simTime_id, dt, turb_i, mpi_u_flui
     #     problem.rotor_torque_count = np.zeros(problem.farm.numturbs)
     #     problem.rotor_torque_dolfin = np.zeros(problem.farm.numturbs)
 
-
-    if use_OM:
-        import openmdao.api as om
-        from windse.ALM_OM import ALMGroup
-        
-        prob = om.Problem()
-        prob.model.add_subsystem('ALMGroup', ALMGroup(problem=problem,
-            simTime_id=simTime_id,
-            dt=dt,
-            turb_i=turb_i,
-            num_blades=num_blades,
-            ), promotes=['*'])
-        prob.setup()
-        # prob['yaw'] = yaw
-        prob.run_model()
-        
-        if dfd == None:
-            tf.vector()[:] = prob['turbine_forces'].flatten()
-            return tf
 
     # initialize numpy torque
     rotor_torque_numpy_temp = 0.0
