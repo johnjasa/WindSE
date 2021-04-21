@@ -711,6 +711,7 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         self.add_input('blade_unit_vec', shape=(3, 3))
         self.add_input('nodal_lift', shape=(n_points, num_blade_segs))
         self.add_input('nodal_drag', shape=(n_points, num_blade_segs))
+        self.add_output('lift_unit_vec', shape=(3, num_blade_segs))
         self.add_output('lift_force', shape=(n_points, ndim))
         self.add_output('drag_force', shape=(n_points, ndim))
         
@@ -751,6 +752,7 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         nodal_drag = inputs['nodal_drag']
         
         lift_unit_vec = np.cross(-u_unit_vec, blade_unit_vec[:, 1], axisa=0)
+        outputs['lift_unit_vec'] = lift_unit_vec
         
         outputs['drag_force'] = np.einsum('ij,jk->ik', nodal_drag, -u_unit_vec.T)
         outputs['lift_force'] = np.einsum('ij,jk->ik', nodal_lift, lift_unit_vec)
@@ -776,6 +778,57 @@ class ComputeLiftDragForces(om.ExplicitComponent):
         derivs = np.tile(lift_unit_vec.flatten(), n_points)
         partials['lift_force', 'nodal_lift'] = derivs
         
+        
+class ComputeRotorTorque(om.ExplicitComponent):
+
+    def initialize(self):
+        self.options.declare('problem', types=object)
+        
+    def setup(self):
+        self.problem = self.options['problem']
+        ndim = self.problem.dom.dim
+        n_points = self.problem.coords.shape[0]
+        num_blade_segs = self.problem.num_blade_segments
+        
+        self.add_input('u_unit_vec', shape=(3, num_blade_segs))
+        self.add_input('blade_unit_vec', shape=(3, 3))
+        self.add_input('lift', shape=num_blade_segs)
+        self.add_input('drag', shape=num_blade_segs)
+        self.add_input('lift_unit_vec', shape=(3, num_blade_segs))
+        self.add_input('rdim', shape=self.problem.num_blade_segments)
+        self.add_output('actuator_torque', val=0.)
+        
+    def compute(self, inputs, outputs):
+        problem = self.problem
+        ndim = self.problem.dom.dim
+        blade_unit_vec = inputs['blade_unit_vec']
+        lift_unit_vec = inputs['lift_unit_vec']
+        lift = inputs['lift']
+        drag = inputs['drag']
+        rdim = inputs['rdim']
+        
+        outputs['actuator_torque'] = 0.
+        for k in range(problem.num_blade_segments):
+            # The drag unit simply points opposite the relative velocity unit vector
+            drag_unit_vec = -np.copy(inputs['u_unit_vec'][:, k])
+            
+            # Compute the total force vector [x, y, z] at a single actuator node
+            actuator_lift = lift[k] * lift_unit_vec[:, k]
+            actuator_drag = drag[k] * drag_unit_vec
+
+            # Note: since this will be used to define the force (torque) from fluid -> blade
+            # we reverse the direction that otherwise gives the turbine force from blade -> fluid
+            actuator_force = -(actuator_lift + actuator_drag)
+            # actuator_force = -(actuator_lift - actuator_drag)
+
+            # Find the component in the direction tangential to the blade
+            tangential_actuator_force = np.dot(actuator_force, blade_unit_vec[:, 2])
+
+            # Multiply by the distance away from the hub to get a torque
+            actuator_torque = tangential_actuator_force*rdim[k]
+            
+            outputs['actuator_torque'] += actuator_torque
+        
 
 class ComputeTurbineForce(om.ExplicitComponent):
 
@@ -793,20 +846,25 @@ class ComputeTurbineForce(om.ExplicitComponent):
         for i_blade in range(self.options['num_blades']):
             self.add_input(f'lift_force_{i_blade}', shape=(n_points, ndim))
             self.add_input(f'drag_force_{i_blade}', shape=(n_points, ndim))
+            self.add_input(f'actuator_torque_{i_blade}', val=0.)
             
             self.declare_partials('turbine_forces', f'lift_force_{i_blade}', rows=arange, cols=arange, val=1.)
             self.declare_partials('turbine_forces', f'drag_force_{i_blade}', rows=arange, cols=arange, val=1.)
+            self.declare_partials('rotor_torque', f'actuator_torque_{i_blade}', val=1.)
             
         self.add_output('turbine_forces', shape=n_points * ndim)
+        self.add_output('rotor_torque', val=0.)
         
     def compute(self, inputs, outputs):
         problem = self.problem
         ndim = self.problem.dom.dim
         turbine_force = np.zeros(inputs['drag_force_0'].shape)
         
+        outputs['rotor_torque'] = 0.
         for i_blade in range(self.options['num_blades']):
             # The total turbine force is the sum of lift and drag effects
             turbine_force += inputs[f'drag_force_{i_blade}'] + inputs[f'lift_force_{i_blade}']
+            outputs['rotor_torque'] += inputs[f'actuator_torque_{i_blade}']
 
         tf_vec = np.zeros(np.size(self.problem.coords))
         
@@ -918,6 +976,16 @@ class ALMBlade(om.Group):
             ),
             promotes=["*"],
         )
+        
+        self.add_subsystem(
+            "ComputeRotorTorque",
+            ComputeRotorTorque(
+                problem=self.problem,
+            ),
+            promotes=["*"],
+        )
+        
+        
 
 
 class ALMGroup(om.Group):
@@ -965,6 +1033,7 @@ class ALMGroup(om.Group):
             self.connect("theta_vec", f"ALMBlade_{i_blade}.theta", src_indices=[i_blade])
             self.connect(f"ALMBlade_{i_blade}.lift_force", f"lift_force_{i_blade}")
             self.connect(f"ALMBlade_{i_blade}.drag_force", f"drag_force_{i_blade}")
+            self.connect(f"ALMBlade_{i_blade}.actuator_torque", f"actuator_torque_{i_blade}")
 
 
         self.add_subsystem(

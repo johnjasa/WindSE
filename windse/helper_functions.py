@@ -647,6 +647,8 @@ def UpdateActuatorLineForce(problem, mpi_u_fluid_constant, simTime_id, dt, turb_
             i += 3*problem.num_blade_segments
         prob.run_model()
         
+        problem.rotor_torque[turb_i] = prob['rotor_torque']
+        
         if dfd == None:
             tf.vector()[:] = prob['turbine_forces'].flatten()
             return tf
